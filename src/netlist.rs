@@ -805,7 +805,7 @@ where
             .owner
             .upgrade()
             .expect("NetRef is unlinked from netlist");
-        netlist.replace_net_uses(self, other)
+        netlist.replace_net_uses(self.into(), &other.clone().into())
     }
 
     /// Clears the attribute with the given key on this circuit node.
@@ -1334,26 +1334,19 @@ where
         Ok(netref.unwrap().borrow().get().clone())
     }
 
-    /// Replace uses of one driven net with another (single-output nodes).
-    /// Inputs/constants are fine. Panics on multi-output nodes.
-     pub fn replace_net_uses_driven(&self, of: DrivenNet<I>, with: &DrivenNet<I>) -> Result<Object<I>, String> {
-        // Convert the borrowed DrivenNet to a NetRef without consuming it
-        let with_nr = with.clone().unwrap();
-        self.replace_net_uses(of.unwrap(), &with_nr)
-    }
-
     /// Replaces the uses of a circuit node with another circuit node. The [Object] stored at `of` is returned.
     /// Panics if `of` and  `with` are not single-output nodes.
-    pub fn replace_net_uses(&self, of: NetRef<I>, with: &NetRef<I>) -> Result<Object<I>, String> {
-        let unwrapped = of.clone().unwrap();
+    pub fn replace_net_uses(&self, of: DrivenNet<I>, with: &DrivenNet<I>) -> Result<Object<I>, String> {
+        let unwrapped = of.clone().unwrap().unwrap();
+        // Rc (1) - Netlist Owner
+        // Rc (2) - Argument
+        // Rc (3) - Unwrapped Counter Checker
         if Rc::strong_count(&unwrapped) > 3 {
             return Err("Cannot replace. References still exist on this node".to_string());
         }
 
-        let old_tag: DrivenNet<I> = of.clone().into();
-        let old_index = old_tag.get_operand();
-        let new_tag: DrivenNet<I> = with.clone().into();
-        let new_index = new_tag.get_operand();
+        let old_index = of.get_operand();
+        let new_index = with.get_operand();
         let objects = self.objects.borrow();
         for oref in objects.iter() {
             let operands = &mut oref.borrow_mut().operands;
@@ -1375,44 +1368,8 @@ where
             self.outputs.borrow_mut().insert(new_index, v.clone());
         }
 
-        Ok(of.unwrap().borrow().get().clone())
+        Ok(of.unwrap().unwrap().borrow().get().clone())
     }
-  
-    /// Replace uses of a specific driven output with another specific driven output.
-    /// This supports inputs, single-output, and multi-output instances by preserving
-    /// the exact output port indices encoded in the provided [DrivenNet]s.
-    pub fn replace_output_uses(&self,of: DrivenNet<I>, with: DrivenNet<I>) -> Result<Object<I>, String> {
-        // Build precise operands (keeps multi-output indices)
-        let old_index = of.get_operand();
-        let new_index = with.get_operand();
-
-        // Guard against lingering external references to the source node.
-        // Consume `of` to avoid creating extra Rc clones when obtaining the inner handle.
-        let of_rc = of.unwrap().unwrap(); // DrivenNet -> NetRef -> Rc<...>
-        if Rc::strong_count(&of_rc) > 3 {
-            return Err("Cannot replace. References still exist on this node".to_string());
-        }
-        // Remap operands across all objects
-        let objects = self.objects.borrow();
-        for oref in objects.iter() {
-            let operands = &mut oref.borrow_mut().operands;
-            for operand in operands.iter_mut() {
-                if let Some(op) = operand && *op == old_index {
-                    *operand = Some(new_index.clone());
-                }
-            }
-        }
-        // Update output mapping table
-        let already_mapped = self.outputs.borrow().contains_key(&new_index);
-        let old_mapping = self.outputs.borrow_mut().remove(&old_index);
-        
-        if already_mapped {
-            self.outputs.borrow_mut().remove(&old_index);
-        } else if let Some(v) = old_mapping {
-            self.outputs.borrow_mut().insert(new_index, v.clone());
-        }
-        Ok(of_rc.borrow().get().clone())
-    } 
 
 }
 
