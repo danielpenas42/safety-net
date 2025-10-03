@@ -807,7 +807,7 @@ where
             .owner
             .upgrade()
             .expect("NetRef is unlinked from netlist");
-        netlist.replace_net_uses(self, other)
+        netlist.replace_net_uses(self.into(), &other.clone().into())
     }
 
     /// Clears the attribute with the given key on this circuit node.
@@ -1351,16 +1351,22 @@ where
 
     /// Replaces the uses of a circuit node with another circuit node. The [Object] stored at `of` is returned.
     /// Panics if `of` and  `with` are not single-output nodes.
+<<<<<<< HEAD
     pub fn replace_net_uses(&self, of: NetRef<I>, with: &NetRef<I>) -> Result<Object<I>, Error> {
         let unwrapped = of.clone().unwrap();
+=======
+    pub fn replace_net_uses(&self, of: DrivenNet<I>, with: &DrivenNet<I>) -> Result<Object<I>, String> {
+        let unwrapped = of.clone().unwrap().unwrap();
+        // Rc (1) - Netlist Owner
+        // Rc (2) - Argument
+        // Rc (3) - Unwrapped Counter Checker
+>>>>>>> feature/multi-output-replace
         if Rc::strong_count(&unwrapped) > 3 {
             return Err(Error::DanglingReference(of.nets().collect()));
         }
 
-        let old_tag: DrivenNet<I> = of.clone().into();
-        let old_index = old_tag.get_operand();
-        let new_tag: DrivenNet<I> = with.clone().into();
-        let new_index = new_tag.get_operand();
+        let old_index = of.get_operand();
+        let new_index = with.get_operand();
         let objects = self.objects.borrow();
         for oref in objects.iter() {
             let operands = &mut oref.borrow_mut().operands;
@@ -1382,8 +1388,9 @@ where
             self.outputs.borrow_mut().insert(new_index, v.clone());
         }
 
-        Ok(of.unwrap().borrow().get().clone())
+        Ok(of.unwrap().unwrap().borrow().get().clone())
     }
+
 }
 
 impl<I> Netlist<I>
