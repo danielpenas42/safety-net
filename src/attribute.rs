@@ -116,6 +116,16 @@ impl Parameter {
         bv.truncate(size);
         Self::BitVec(bv)
     }
+
+    /// Create a new Logic parameter
+    pub fn logic(l: Logic) -> Self {
+        Self::Logic(l)
+    }
+
+    /// Create a new Logic parameter from bool
+    pub fn from_bool(b: bool) -> Self {
+        Self::Logic(Logic::from_bool(b))
+    }
 }
 
 /// Filter nodes/nets in the netlist by some attribute, like "dont_touch"
@@ -217,7 +227,11 @@ mod tests {
         let p1 = Parameter::Integer(42);
         // Lsb first
         let p2 = Parameter::BitVec(bitvec![0, 0, 0, 0, 0, 0, 0, 1]);
+        let p3 = Parameter::Logic(Logic::from_bool(true));
+        let p4 = Parameter::from_bool(true);
         assert_eq!(p1.to_string(), "42");
         assert_eq!(p2.to_string(), "8'b10000000");
+        assert_eq!(p3.to_string(), "1'b1");
+        assert_eq!(p4.to_string(), "1'b1");
     }
 }
