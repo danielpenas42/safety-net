@@ -1,12 +1,12 @@
-use safety_net::attribute::dont_touch_filter;
-use safety_net::circuit::Net;
+use safety_net::FanOutTable;
+use safety_net::Gate;
+use safety_net::GateNetlist;
+use safety_net::Net;
+use safety_net::Netlist;
+use safety_net::SimpleCombDepth;
+use safety_net::dont_touch_filter;
 use safety_net::format_id;
-use safety_net::graph::FanOutTable;
-use safety_net::graph::SimpleCombDepth;
-use safety_net::netlist::Gate;
-use safety_net::netlist::GateNetlist;
-use safety_net::netlist::Netlist;
-use safety_net::netlist::iter::DFSIterator;
+use safety_net::iter::DFSIterator;
 use std::rc::Rc;
 
 fn and_gate() -> Gate {
@@ -129,7 +129,7 @@ fn test_attr_filter() {
 #[cfg(feature = "graph")]
 #[test]
 fn test_petgraph() {
-    use safety_net::graph::MultiDiGraph;
+    use safety_net::MultiDiGraph;
 
     let netlist = get_simple_example();
 
