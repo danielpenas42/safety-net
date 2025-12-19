@@ -1,13 +1,15 @@
 //! Demonstrates how to wrap several instantiable types into a 'Cell' enum
 //! This could make certain traversals and manipulations easier
 
+#[cfg(feature = "derive")]
 use bitvec::vec::BitVec;
-use safety_net::{
-    Gate, Identifier, Instantiable, Logic, Net, Netlist, Parameter, dont_care, format_id,
-};
+#[cfg(feature = "derive")]
+use safety_net::{Gate, Netlist, dont_care, format_id};
+use safety_net::{Identifier, Instantiable, Logic, Net, Parameter};
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg(feature = "derive")]
 struct Lut {
     lookup_table: BitVec,
     id: Identifier,
@@ -15,6 +17,7 @@ struct Lut {
     output: Net,
 }
 
+#[cfg(feature = "derive")]
 impl Lut {
     fn new(k: usize, lookup_table: usize) -> Self {
         let mut bv: BitVec<usize, _> = BitVec::from_element(lookup_table);
@@ -28,6 +31,7 @@ impl Lut {
     }
 }
 
+#[cfg(feature = "derive")]
 impl Instantiable for Lut {
     fn get_name(&self) -> &Identifier {
         &self.id
@@ -246,93 +250,13 @@ impl Instantiable for FlipFlop {
     }
 }
 
-#[derive(Debug, Clone)]
+#[cfg(feature = "derive")]
+#[derive(Debug, Clone, inst_derive::Instantiable)]
 enum Cell {
     Lut(Lut),
     FlipFlop(FlipFlop),
+    #[instantiable(constant)]
     Gate(Gate),
-}
-
-impl Instantiable for Cell {
-    fn get_name(&self) -> &Identifier {
-        match self {
-            Cell::Lut(lut) => lut.get_name(),
-            Cell::FlipFlop(ff) => ff.get_name(),
-            Cell::Gate(gate) => gate.get_name(),
-        }
-    }
-
-    fn get_input_ports(&self) -> impl IntoIterator<Item = &Net> {
-        match self {
-            Cell::Lut(lut) => lut.get_input_ports().into_iter().collect::<Vec<_>>(),
-            Cell::FlipFlop(ff) => ff.get_input_ports().into_iter().collect::<Vec<_>>(),
-            Cell::Gate(gate) => gate.get_input_ports().into_iter().collect::<Vec<_>>(),
-        }
-    }
-
-    fn get_output_ports(&self) -> impl IntoIterator<Item = &Net> {
-        match self {
-            Cell::Lut(lut) => lut.get_output_ports().into_iter().collect::<Vec<_>>(),
-            Cell::FlipFlop(ff) => ff.get_output_ports().into_iter().collect::<Vec<_>>(),
-            Cell::Gate(gate) => gate.get_output_ports().into_iter().collect::<Vec<_>>(),
-        }
-    }
-
-    fn has_parameter(&self, id: &Identifier) -> bool {
-        match self {
-            Cell::Lut(lut) => lut.has_parameter(id),
-            Cell::FlipFlop(ff) => ff.has_parameter(id),
-            Cell::Gate(gate) => gate.has_parameter(id),
-        }
-    }
-
-    fn get_parameter(&self, id: &Identifier) -> Option<Parameter> {
-        match self {
-            Cell::Lut(lut) => lut.get_parameter(id),
-            Cell::FlipFlop(ff) => ff.get_parameter(id),
-            Cell::Gate(gate) => gate.get_parameter(id),
-        }
-    }
-
-    fn set_parameter(&mut self, id: &Identifier, val: Parameter) -> Option<Parameter> {
-        match self {
-            Cell::Lut(lut) => lut.set_parameter(id, val),
-            Cell::FlipFlop(ff) => ff.set_parameter(id, val),
-            Cell::Gate(gate) => gate.set_parameter(id, val),
-        }
-    }
-
-    fn parameters(&self) -> impl Iterator<Item = (Identifier, Parameter)> {
-        match self {
-            Cell::Lut(lut) => lut.parameters().collect::<Vec<_>>().into_iter(),
-            Cell::FlipFlop(ff) => ff.parameters().collect::<Vec<_>>().into_iter(),
-            Cell::Gate(gate) => gate.parameters().collect::<Vec<_>>().into_iter(),
-        }
-    }
-
-    fn from_constant(val: Logic) -> Option<Self> {
-        if (val == Logic::True) || (val == Logic::False) {
-            Lut::from_constant(val).map(Cell::Lut)
-        } else {
-            None
-        }
-    }
-
-    fn get_constant(&self) -> Option<Logic> {
-        match self {
-            Cell::Lut(lut) => lut.get_constant(),
-            Cell::FlipFlop(ff) => ff.get_constant(),
-            Cell::Gate(gate) => gate.get_constant(),
-        }
-    }
-
-    fn is_seq(&self) -> bool {
-        match self {
-            Cell::Lut(lut) => lut.is_seq(),
-            Cell::FlipFlop(ff) => ff.is_seq(),
-            Cell::Gate(gate) => gate.is_seq(),
-        }
-    }
 }
 
 #[test]
@@ -344,6 +268,7 @@ fn test_flopvariant() {
 }
 
 #[test]
+#[cfg(feature = "derive")]
 fn cell_test_get_name() {
     let lut = Lut::new(4, 0xAAAA);
     let ff = FlipFlop::new(FlopVariant::new("FDCE"), Logic::False);
@@ -359,6 +284,7 @@ fn cell_test_get_name() {
 }
 
 #[test]
+#[cfg(feature = "derive")]
 fn cell_test_get_inputs_outputs() {
     let lut = Lut::new(4, 0xAAAA);
     let ff = FlipFlop::new(FlopVariant::new("FDSE"), Logic::False);
@@ -389,6 +315,7 @@ fn cell_test_get_inputs_outputs() {
 }
 
 #[test]
+#[cfg(feature = "derive")]
 fn cell_test_parameters() {
     let lut = Lut::new(4, 0xAAAA);
     let ff = FlipFlop::new(FlopVariant::new("FDSE"), Logic::False);
@@ -426,6 +353,7 @@ fn cell_test_parameters() {
 }
 
 #[test]
+#[cfg(feature = "derive")]
 fn cell_test_constants() {
     // from_constant and get_constant tests
     let vdd = Cell::from_constant(Logic::True).unwrap();
@@ -435,6 +363,7 @@ fn cell_test_constants() {
 }
 
 #[test]
+#[cfg(feature = "derive")]
 fn cell_test_is_seq() {
     let lut = Lut::new(4, 0xAAAA);
     let ff = FlipFlop::new(FlopVariant::new("FDSE"), Logic::False);
@@ -450,6 +379,7 @@ fn cell_test_is_seq() {
 }
 
 #[test]
+#[cfg(feature = "derive")]
 fn insert_cell_test() {
     let netlist = Netlist::new("test_netlist".to_string());
 
