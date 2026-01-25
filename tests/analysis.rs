@@ -152,10 +152,7 @@ fn test_comb_depth() {
 
     let gate = netlist.last().unwrap();
 
-    assert_eq!(
-        depth_info.get_comb_depth(&gate),
-        &CombDepthResult::Depth((1))
-    );
+    assert_eq!(depth_info.get_comb_depth(&gate), &CombDepthResult::Depth(1));
     assert_eq!(depth_info.get_max_depth(), Some(1));
 }
 

@@ -132,6 +132,7 @@ pub enum CombDepthResult {
 pub struct SimpleCombDepth<'a, I: Instantiable> {
     _netlist: &'a Netlist<I>,
     results: HashMap<NetRef<I>, CombDepthResult>,
+    max_depth: Option<usize>,
 }
 
 impl<I> SimpleCombDepth<'_, I>
@@ -145,16 +146,7 @@ where
 
     /// Returns the maximum logic level of the circuit.
     pub fn get_max_depth(&self) -> Option<usize> {
-        self.results
-            .values()
-            .filter_map(|r| {
-                if let CombDepthResult::Depth(d) = r {
-                    Some(*d)
-                } else {
-                    None
-                }
-            })
-            .max()
+        self.max_depth
     }
 }
 impl<'a, I> Analysis<'a, I> for SimpleCombDepth<'a, I>
@@ -162,6 +154,10 @@ where
     I: Instantiable,
 {
     fn build(netlist: &'a Netlist<I>) -> Result<Self, Error> {
+        let mut results: HashMap<NetRef<I>, CombDepthResult> = HashMap::new();
+        let mut visiting: HashSet<NetRef<I>> = HashSet::new();
+        let mut max_depth: Option<usize> = None;
+
         fn compute<I: Instantiable>(
             node: NetRef<I>,
             netlist: &Netlist<I>,
@@ -175,9 +171,10 @@ where
 
             // Cycle detection
             if visiting.contains(&node) {
-                let r = CombDepthResult::PartOfCycle;
-                results.insert(node.clone(), r.clone());
-                return r;
+                for n in visiting.iter() {
+                    results.insert(n.clone(), CombDepthResult::PartOfCycle);
+                }
+                return CombDepthResult::PartOfCycle;
             }
 
             // Input nodes have depth 0
@@ -228,12 +225,13 @@ where
             r
         }
 
-        let mut results: HashMap<NetRef<I>, CombDepthResult> = HashMap::new();
-        let mut visiting: HashSet<NetRef<I>> = HashSet::new();
-
         for (driven, _) in netlist.outputs() {
             let node = driven.unwrap();
-            compute(node, netlist, &mut results, &mut visiting);
+            let r = compute(node, netlist, &mut results, &mut visiting);
+
+            if let CombDepthResult::Depth(d) = r {
+                max_depth = Some(max_depth.map_or(d, |m| m.max(d)));
+            }
         }
 
         for node in netlist.objects() {
@@ -243,6 +241,7 @@ where
         Ok(SimpleCombDepth {
             _netlist: netlist,
             results,
+            max_depth,
         })
     }
 }
