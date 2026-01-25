@@ -1,3 +1,4 @@
+use safety_net::CombDepthResult;
 use safety_net::FanOutTable;
 use safety_net::Gate;
 use safety_net::GateNetlist;
@@ -151,8 +152,93 @@ fn test_comb_depth() {
 
     let gate = netlist.last().unwrap();
 
-    assert_eq!(depth_info.get_comb_depth(&gate), Some(1));
-    assert_eq!(depth_info.get_max_depth(), 1);
+    assert_eq!(
+        depth_info.get_comb_depth(&gate),
+        &CombDepthResult::Depth((1))
+    );
+    assert_eq!(depth_info.get_max_depth(), Some(1));
+}
+
+#[test]
+fn test_comb_depth_dag_shared_subgraph() {
+    let netlist = Netlist::new("dag".to_string());
+
+    let a = netlist.insert_input("a".into());
+    let b = netlist.insert_input("b".into());
+    let c = netlist.insert_input("c".into());
+
+    let and = netlist
+        .insert_gate(and_gate(), "and".into(), &[a.clone(), b.clone()])
+        .unwrap();
+
+    let or = netlist
+        .insert_gate(
+            Gate::new_logical("OR".into(), vec!["A".into(), "B".into()], "Y".into()),
+            "or".into(),
+            &[and.clone().into(), c.clone()],
+        )
+        .unwrap();
+
+    or.expose_with_name("y".into());
+    let or_node = netlist.last().unwrap();
+
+    let depth_info = netlist.get_analysis::<SimpleCombDepth<_>>().unwrap();
+
+    assert_eq!(depth_info.get_comb_depth(&and), &CombDepthResult::Depth(1));
+    assert_eq!(
+        depth_info.get_comb_depth(&or_node),
+        &CombDepthResult::Depth(2)
+    );
+    assert_eq!(depth_info.get_max_depth(), Some(2));
+}
+
+#[test]
+fn test_comb_depth_incomplete() {
+    let netlist = Netlist::new("incomplete".to_string());
+
+    let a = netlist.insert_input("a".into());
+
+    // Create AND gate but do NOT connect all inputs
+    let and = netlist.insert_gate_disconnected(and_gate(), "and".into());
+
+    // Connect only one input
+    and.find_input(&"A".into()).unwrap().connect(a.into());
+    // "B" is left unconnected → incomplete
+
+    and.expose_with_name("y".into());
+
+    let depth_info = netlist.get_analysis::<SimpleCombDepth<_>>().unwrap();
+    let and_node = netlist.last().unwrap();
+    assert_eq!(
+        depth_info.get_comb_depth(&and_node),
+        &CombDepthResult::Undefined
+    );
+}
+
+#[test]
+fn test_comb_depth_cycle() {
+    let netlist = Netlist::new("cycle".to_string());
+
+    let inv = netlist.insert_gate_disconnected(
+        Gate::new_logical("INV".into(), vec!["I".into()], "O".into()),
+        "inv".into(),
+    );
+
+    let input = inv.find_input(&"I".into()).unwrap();
+    let output = inv.get_output(0);
+
+    // Create combinational loop
+    input.connect(output.into());
+
+    inv.expose_with_name("y".into());
+
+    let depth_info = netlist.get_analysis::<SimpleCombDepth<_>>().unwrap();
+    let inv_node = netlist.last().unwrap();
+
+    assert_eq!(
+        depth_info.get_comb_depth(&inv_node),
+        &CombDepthResult::PartOfCycle
+    );
 }
 
 #[test]
