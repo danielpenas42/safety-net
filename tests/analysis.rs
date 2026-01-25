@@ -199,7 +199,7 @@ fn test_comb_depth_incomplete() {
     let and = netlist.insert_gate_disconnected(and_gate(), "and".into());
 
     // Connect only one input
-    and.find_input(&"A".into()).unwrap().connect(a.into());
+    and.find_input(&"A".into()).unwrap().connect(a);
     // "B" is left unconnected → incomplete
 
     and.expose_with_name("y".into());
@@ -225,7 +225,7 @@ fn test_comb_depth_cycle() {
     let output = inv.get_output(0);
 
     // Create combinational loop
-    input.connect(output.into());
+    input.connect(output);
 
     inv.expose_with_name("y".into());
 
