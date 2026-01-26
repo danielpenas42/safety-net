@@ -8,7 +8,6 @@ use crate::circuit::{Instantiable, Net};
 use crate::error::Error;
 #[cfg(feature = "graph")]
 use crate::netlist::Connection;
-use crate::netlist::iter::DFSIterator;
 use crate::netlist::{NetRef, Netlist};
 #[cfg(feature = "graph")]
 use petgraph::graph::DiGraph;
@@ -111,15 +110,29 @@ where
     }
 }
 
-/// An simple example to analyze the logic levels of a netlist.
+/// A simple example to analyze the logic levels of a netlist.
 /// This analysis checks for cycles, but it doesn't check for registers.
+/// Result of combinational depth analysis for a single net.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CombDepthResult {
+    /// Signal has no driver
+    Undefined,
+    /// Signal is along a cycle
+    PartOfCycle,
+    /// Integer logic level
+    Depth(usize),
+}
+
+/// Computes the combinational depth of each net in a netlist.
+///
+/// Each net is classified as having a defined depth, being undefined,
+/// or participating in a combinational cycle.
 pub struct SimpleCombDepth<'a, I: Instantiable> {
-    /// A reference to the underlying netlist
     _netlist: &'a Netlist<I>,
-    /// Maps a net to its logic level as a DAG
-    comb_depth: HashMap<NetRef<I>, usize>,
-    /// The maximum depth of the circuit
-    max_depth: usize,
+    results: HashMap<NetRef<I>, CombDepthResult>,
+    /// Max will be None whenever no outputs in the whole netlist have a well defined combinational depth
+    /// for example if they are all undefined or they all partake in a cycle
+    max_depth: Option<usize>,
 }
 
 impl<I> SimpleCombDepth<'_, I>
@@ -127,56 +140,103 @@ where
     I: Instantiable,
 {
     /// Returns the logic level of a node in the circuit.
-    pub fn get_comb_depth(&self, node: &NetRef<I>) -> Option<usize> {
-        self.comb_depth.get(node).cloned()
+    pub fn get_comb_depth(&self, node: &NetRef<I>) -> Option<CombDepthResult> {
+        self.results.get(node).copied()
     }
 
     /// Returns the maximum logic level of the circuit.
-    pub fn get_max_depth(&self) -> usize {
+    pub fn get_max_depth(&self) -> Option<usize> {
         self.max_depth
     }
 }
-
 impl<'a, I> Analysis<'a, I> for SimpleCombDepth<'a, I>
 where
     I: Instantiable,
 {
     fn build(netlist: &'a Netlist<I>) -> Result<Self, Error> {
-        let mut comb_depth: HashMap<NetRef<I>, usize> = HashMap::new();
+        let mut results: HashMap<NetRef<I>, CombDepthResult> = HashMap::new();
+        let mut visiting: HashSet<NetRef<I>> = HashSet::new();
+        let mut max_depth: Option<usize> = None;
 
-        let mut nodes = Vec::new();
-        for (driven, _) in netlist.outputs() {
-            let mut dfs = DFSIterator::new(netlist, driven.clone().unwrap());
-            while let Some(n) = dfs.next() {
-                if dfs.check_cycles() {
-                    return Err(Error::CycleDetected(vec![driven.as_net().clone()]));
+        fn compute<I: Instantiable>(
+            node: NetRef<I>,
+            netlist: &Netlist<I>,
+            results: &mut HashMap<NetRef<I>, CombDepthResult>,
+            visiting: &mut HashSet<NetRef<I>>,
+        ) -> CombDepthResult {
+            // Memoized result
+            if let Some(&r) = results.get(&node) {
+                return r;
+            }
+
+            // Cycle detection
+            if visiting.contains(&node) {
+                for n in visiting.iter() {
+                    results.insert(n.clone(), CombDepthResult::PartOfCycle);
                 }
-                nodes.push(n);
+                return CombDepthResult::PartOfCycle;
             }
-        }
-        nodes.reverse();
-        nodes.dedup();
 
-        for node in nodes {
+            // Input nodes have depth 0
             if node.is_an_input() {
-                comb_depth.insert(node.clone(), 0);
-            } else {
-                let max_depth: usize = (0..node.get_num_input_ports())
-                    .filter_map(|i| netlist.get_driver(node.clone(), i))
-                    .filter_map(|n| comb_depth.get(&n))
-                    .max()
-                    .cloned()
-                    .unwrap_or(usize::MAX);
-
-                comb_depth.insert(node, max_depth + 1);
+                let r = CombDepthResult::Depth(0);
+                results.insert(node.clone(), r);
+                return r;
             }
+
+            visiting.insert(node.clone());
+
+            let mut max_depth = 0;
+
+            for i in 0..node.get_num_input_ports() {
+                let driver = match netlist.get_driver(node.clone(), i) {
+                    Some(d) => d,
+                    None => {
+                        let r = CombDepthResult::Undefined;
+                        results.insert(node.clone(), r);
+                        visiting.remove(&node);
+                        return r;
+                    }
+                };
+
+                match compute(driver, netlist, results, visiting) {
+                    CombDepthResult::Depth(d) => {
+                        max_depth = max_depth.max(d);
+                    }
+                    CombDepthResult::Undefined => {
+                        let r = CombDepthResult::Undefined;
+                        results.insert(node.clone(), r);
+                        visiting.remove(&node);
+                        return r;
+                    }
+                    CombDepthResult::PartOfCycle => {
+                        let r = CombDepthResult::PartOfCycle;
+                        results.insert(node.clone(), r);
+                        visiting.remove(&node);
+                        return r;
+                    }
+                }
+            }
+
+            visiting.remove(&node);
+
+            let r = CombDepthResult::Depth(max_depth + 1);
+            results.insert(node.clone(), r);
+            r
         }
 
-        let max_depth = comb_depth.values().max().cloned().unwrap_or(0);
+        for (driven, _) in netlist.outputs() {
+            let node = driven.unwrap();
+            let r = compute(node, netlist, &mut results, &mut visiting);
+
+            if let CombDepthResult::Depth(d) = r {
+                max_depth = Some(max_depth.map_or(d, |m| m.max(d)));
+            }
+        }
 
         Ok(SimpleCombDepth {
             _netlist: netlist,
-            comb_depth,
+            results,
             max_depth,
         })
     }

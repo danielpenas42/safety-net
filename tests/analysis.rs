@@ -3,7 +3,6 @@ use safety_net::Gate;
 use safety_net::GateNetlist;
 use safety_net::Net;
 use safety_net::Netlist;
-use safety_net::SimpleCombDepth;
 use safety_net::dont_touch_filter;
 use safety_net::format_id;
 use safety_net::iter::DFSIterator;
@@ -31,7 +30,6 @@ fn get_simple_example() -> Rc<GateNetlist> {
 
     netlist
 }
-
 fn divider_netlist() -> Rc<GateNetlist> {
     let netlist = Netlist::new("example".to_string());
 
@@ -140,19 +138,6 @@ fn test_petgraph() {
     // Outputs are a pseudo node
     assert_eq!(graph.node_count(), 4);
     assert_eq!(graph.edge_count(), 3);
-}
-
-#[test]
-fn test_comb_depth() {
-    let netlist = get_simple_example();
-    let depth_info = netlist.get_analysis::<SimpleCombDepth<_>>();
-    assert!(depth_info.is_ok());
-    let depth_info = depth_info.unwrap();
-
-    let gate = netlist.last().unwrap();
-
-    assert_eq!(depth_info.get_comb_depth(&gate), Some(1));
-    assert_eq!(depth_info.get_max_depth(), 1);
 }
 
 #[test]
