@@ -140,8 +140,8 @@ where
     I: Instantiable,
 {
     /// Returns the logic level of a node in the circuit.
-    pub fn get_comb_depth(&self, node: &NetRef<I>) -> Option<&CombDepthResult> {
-        self.results.get(node)
+    pub fn get_comb_depth(&self, node: &NetRef<I>) -> Option<CombDepthResult> {
+        self.results.get(node).copied()
     }
 
     /// Returns the maximum logic level of the circuit.
@@ -165,8 +165,8 @@ where
             visiting: &mut HashSet<NetRef<I>>,
         ) -> CombDepthResult {
             // Memoized result
-            if let Some(r) = results.get(&node) {
-                return *r;
+            if let Some(&r) = results.get(&node) {
+                return r;
             }
 
             // Cycle detection

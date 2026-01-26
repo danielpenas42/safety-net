@@ -103,13 +103,13 @@ fn test_comb_loop() {
     // The gate is part of a loop, so it should return CombDepthResult::PartofCycle
     assert_eq!(
         depth_info.get_comb_depth(&gate),
-        Some(&CombDepthResult::PartOfCycle)
+        Some(CombDepthResult::PartOfCycle)
     );
 
     let input = netlist.inputs().next().unwrap();
     assert_eq!(
         depth_info.get_comb_depth(&input.unwrap()),
-        Some(&CombDepthResult::Depth(0))
+        Some(CombDepthResult::Depth(0))
     );
 }
 
@@ -125,7 +125,7 @@ fn test_dag() {
     for netref in netlist.objects() {
         assert_eq!(
             depth_info.get_comb_depth(&netref),
-            map.get(&netref.as_net())
+            map.get(&netref.as_net()).copied()
         );
     }
 }
@@ -141,7 +141,7 @@ fn test_comb_depth() {
 
     assert_eq!(
         depth_info.get_comb_depth(&gate).unwrap(),
-        &CombDepthResult::Depth(1)
+        CombDepthResult::Depth(1)
     );
     assert_eq!(depth_info.get_max_depth(), Some(1));
 }
@@ -173,11 +173,11 @@ fn test_comb_depth_dag_shared_subgraph() {
 
     assert_eq!(
         depth_info.get_comb_depth(&and).unwrap(),
-        &CombDepthResult::Depth(1)
+        CombDepthResult::Depth(1)
     );
     assert_eq!(
         depth_info.get_comb_depth(&or_node).unwrap(),
-        &CombDepthResult::Depth(2)
+        CombDepthResult::Depth(2)
     );
     assert_eq!(depth_info.get_max_depth(), Some(2));
 }
@@ -201,7 +201,7 @@ fn test_comb_depth_incomplete() {
     let and_node = netlist.last().unwrap();
     assert_eq!(
         depth_info.get_comb_depth(&and_node).unwrap(),
-        &CombDepthResult::Undefined
+        CombDepthResult::Undefined
     );
 }
 
@@ -227,6 +227,6 @@ fn test_comb_depth_cycle() {
 
     assert_eq!(
         depth_info.get_comb_depth(&inv_node).unwrap(),
-        &CombDepthResult::PartOfCycle
+        CombDepthResult::PartOfCycle
     );
 }
