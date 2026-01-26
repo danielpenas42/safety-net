@@ -13,7 +13,7 @@ use crate::{
 };
 use std::{
     cell::{Ref, RefCell, RefMut},
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     num::ParseIntError,
     rc::{Rc, Weak},
 };
@@ -146,7 +146,7 @@ impl Gate {
 }
 
 /// An operand to an [Instantiable]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 enum Operand {
     /// An index into the list of objects
@@ -631,6 +631,7 @@ where
     }
 
     /// Exposes this circuit node as a top-level output in the netlist with a specific port name.
+    /// Multiple calls to this method can be used to create multiple output aliases for the same net.
     ///
     /// # Panics
     ///
@@ -667,6 +668,40 @@ where
         let dr = DrivenNet::new(net_index, self.clone());
         netlist.expose_net(dr)?;
         Ok(())
+    }
+
+    /// Removes a specific output alias by its name from this circuit node.
+    /// Returns true if the output was removed, false if it didn't exist.
+    ///
+    /// # Panics
+    ///
+    /// Panics if cell is a multi-output circuit node.
+    /// Panics if the reference to the netlist is lost.
+    pub fn remove_output(&self, net_name: &Identifier) -> bool {
+        let netlist = self
+            .netref
+            .borrow()
+            .owner
+            .upgrade()
+            .expect("NetRef is unlinked from netlist");
+        netlist.remove_output(&self.into(), net_name)
+    }
+
+    /// Removes all output aliases for this circuit node.
+    /// Returns the number of outputs that were removed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if cell is a multi-output circuit node.
+    /// Panics if the reference to the netlist is lost.
+    pub fn remove_all_outputs(&self) -> usize {
+        let netlist = self
+            .netref
+            .borrow()
+            .owner
+            .upgrade()
+            .expect("NetRef is unlinked from netlist");
+        netlist.remove_outputs_for_operand(&self.into())
     }
 
     /// Returns the circuit node that drives the `index`th input
@@ -914,8 +949,8 @@ where
     name: RefCell<String>,
     /// The list of objects in the netlist, such as inputs, modules, and primitives
     objects: RefCell<Vec<NetRefT<I>>>,
-    /// The list of operands that point to objects which are outputs
-    outputs: RefCell<HashMap<Operand, Net>>,
+    /// Each operand can map to multiple nets, supporting output aliases.
+    outputs: RefCell<HashMap<Operand, BTreeSet<Net>>>,
 }
 
 /// Represent the input port of a primitive
@@ -945,8 +980,7 @@ where
         if self.netref.is_an_input() {
             panic!("Input port is not driven by a primitive");
         }
-        if let Some(prev_operand) = self.netref.clone().unwrap().borrow().operands[self.pos].clone()
-        {
+        if let Some(prev_operand) = self.netref.clone().unwrap().borrow().operands[self.pos] {
             let netlist = self
                 .netref
                 .clone()
@@ -1074,7 +1108,7 @@ where
             .upgrade()
             .expect("Output port is unlinked from netlist");
         let obj = netlist.index_weak(&index);
-        obj.borrow_mut().operands[input.pos] = Some(operand.clone());
+        obj.borrow_mut().operands[input.pos] = Some(operand);
     }
 
     /// Returns `true` if this net is a top-level output in the netlist.
@@ -1101,7 +1135,8 @@ where
         self.as_net().get_identifier().clone()
     }
 
-    /// Expose this driven net as a module output
+    /// Exposes this driven net as a top-level output with a specific port name.
+    /// Multiple calls to this method can be used to create multiple output aliases for the same net.
     ///
     /// # Panics
     ///
@@ -1117,6 +1152,42 @@ where
             .expect("DrivenNet is unlinked from netlist");
         netlist.expose_net_with_name(self.clone(), name);
         self
+    }
+
+    /// Removes a specific output alias by its name from this driven net.
+    /// Returns true if the output was removed, false if it didn't exist.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the reference to the netlist is lost.
+    pub fn remove_output(&self, net_name: &Identifier) -> bool {
+        let netlist = self
+            .netref
+            .clone()
+            .unwrap()
+            .borrow()
+            .owner
+            .upgrade()
+            .expect("DrivenNet is unlinked from netlist");
+        netlist.remove_output(self, net_name)
+    }
+
+    /// Removes all output aliases for this driven net.
+    /// Returns the number of outputs that were removed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the reference to the netlist is lost.
+    pub fn remove_all_outputs(&self) -> usize {
+        let netlist = self
+            .netref
+            .clone()
+            .unwrap()
+            .borrow()
+            .owner
+            .upgrade()
+            .expect("DrivenNet is unlinked from netlist");
+        netlist.remove_outputs_for_operand(self)
     }
 
     /// Returns the output position, if the net is the output of a gate.
@@ -1305,25 +1376,67 @@ where
     ///
     /// Panics if `index` is out of bounds
     pub fn get_driver(&self, netref: NetRef<I>, index: usize) -> Option<NetRef<I>> {
-        let op = netref.unwrap().borrow().operands[index].clone()?;
+        let op = netref.unwrap().borrow().operands[index]?;
         Some(NetRef::wrap(self.index_weak(&op.root()).clone()))
     }
 
-    /// Set an added object as a top-level output.
+    /// Set an added object as a top-level output with a specific name.
+    /// Multiple calls with different names for the same net will create multiple aliases.
     pub fn expose_net_with_name(&self, net: DrivenNet<I>, name: Identifier) -> DrivenNet<I> {
         let mut outputs = self.outputs.borrow_mut();
-        outputs.insert(net.get_operand(), net.as_net().with_name(name));
+        let named_net = net.as_net().with_name(name);
+        outputs
+            .entry(net.get_operand())
+            .or_default()
+            .insert(named_net);
         net
     }
 
-    /// Set an added object as a top-level output.
+    /// Sets the current net as a top-level output using the current name of the net
     pub fn expose_net(&self, net: DrivenNet<I>) -> Result<DrivenNet<I>, Error> {
         if net.is_an_input() {
             return Err(Error::InputNeedsAlias(net.as_net().clone()));
         }
         let mut outputs = self.outputs.borrow_mut();
-        outputs.insert(net.get_operand(), net.as_net().clone());
+        outputs
+            .entry(net.get_operand())
+            .or_default()
+            .insert(net.as_net().clone());
         Ok(net)
+    }
+
+    /// Removes a specific output alias by its operand and net name.
+    /// Returns true if the output was removed, false if it didn't exist.
+    pub fn remove_output(&self, operand: &DrivenNet<I>, net_name: &Identifier) -> bool {
+        let mut outputs = self.outputs.borrow_mut();
+        if let Some(nets) = outputs.get_mut(&operand.get_operand()) {
+            // Create a net with just the identifier to match for removal
+            let net_to_remove = Net::new(net_name.clone(), crate::circuit::DataType::logic());
+            if nets.remove(&net_to_remove) {
+                // If the set is now empty, remove the operand entirely
+                if nets.is_empty() {
+                    outputs.remove(&operand.get_operand());
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Removes all output aliases for a specific operand.
+    /// Returns the number of outputs that were removed.
+    pub fn remove_outputs_for_operand(&self, operand: &DrivenNet<I>) -> usize {
+        //let mut outputs = self.outputs.borrow_mut();
+        self.outputs
+            .borrow_mut()
+            .remove(&operand.get_operand())
+            .map(|nets| nets.len())
+            .unwrap_or(0)
+    }
+
+    /// Removes all outputs from the netlist.
+    pub fn clear_outputs(&self) {
+        self.outputs.borrow_mut().clear();
     }
 
     /// Unlink a circuit node from the rest of the netlist. Return the object that was being stored.
@@ -1391,10 +1504,10 @@ where
 
         let old_index = of.get_operand();
 
-        if let Some(v) = self.outputs.borrow().get(&old_index)
-            && *v == *of.as_net()
+        if let Some(nets) = self.outputs.borrow().get(&old_index)
+            && nets.contains(&*of.as_net())
         {
-            return Err(Error::NonuniqueNets(vec![v.clone()]));
+            return Err(Error::NonuniqueNets(nets.iter().cloned().collect()));
         }
 
         let new_index = with.get_operand();
@@ -1405,7 +1518,7 @@ where
                 if let Some(op) = operand
                     && *op == old_index
                 {
-                    *operand = Some(new_index.clone());
+                    *operand = Some(new_index);
                 }
             }
         }
@@ -1415,8 +1528,8 @@ where
 
         if already_mapped {
             self.outputs.borrow_mut().remove(&old_index);
-        } else if let Some(v) = old_mapping {
-            self.outputs.borrow_mut().insert(new_index, v.clone());
+        } else if let Some(nets) = old_mapping {
+            self.outputs.borrow_mut().insert(new_index, nets);
         }
 
         Ok(of.unwrap().unwrap().borrow().get().clone())
@@ -1453,7 +1566,11 @@ where
 
     /// Returns a list of output nets
     pub fn get_output_ports(&self) -> Vec<Net> {
-        self.outputs.borrow().values().cloned().collect::<Vec<_>>()
+        self.outputs
+            .borrow()
+            .values()
+            .flat_map(|nets| nets.iter().cloned())
+            .collect()
     }
 
     /// Constructs an analysis of the netlist.
@@ -1573,7 +1690,7 @@ where
             for operand in obj.borrow_mut().inds_mut() {
                 let root = operand.root();
                 let root = *remap.get(&root).unwrap_or(&root);
-                *operand = operand.clone().remap(root);
+                *operand = operand.remap(root);
             }
         }
 
@@ -1581,7 +1698,7 @@ where
         for (operand, net) in pairs {
             let root = operand.root();
             let root = *remap.get(&root).unwrap_or(&root);
-            let new_operand = operand.clone().remap(root);
+            let new_operand = operand.remap(root);
             self.outputs.borrow_mut().insert(new_operand, net);
         }
 
@@ -2016,11 +2133,13 @@ where
         self.outputs
             .borrow()
             .iter()
-            .map(|(k, n)| {
-                (
-                    DrivenNet::new(k.secondary(), NetRef::wrap(self.index_weak(&k.root()))),
-                    n.clone(),
-                )
+            .flat_map(|(k, nets)| {
+                nets.iter().map(|n| {
+                    (
+                        DrivenNet::new(k.secondary(), NetRef::wrap(self.index_weak(&k.root()))),
+                        n.clone(),
+                    )
+                })
             })
             .collect()
     }
@@ -2066,8 +2185,11 @@ where
                 writeln!(f, "{}{},", indent, net.get_identifier().emit_name())?;
             }
         }
-        for (i, (_, net)) in outputs.iter().enumerate() {
-            if i == outputs.len() - 1 {
+
+        // Flatten the outputs to collect all (operand, net) pairs
+        let all_outputs: Vec<_> = outputs.iter().flat_map(|(_, nets)| nets.iter()).collect();
+        for (i, net) in all_outputs.iter().enumerate() {
+            if i == all_outputs.len() - 1 {
                 writeln!(f, "{}{}", indent, net.get_identifier().emit_name())?;
             } else {
                 writeln!(f, "{}{},", indent, net.get_identifier().emit_name())?;
@@ -2086,11 +2208,13 @@ where
                 already_decl.insert(net.clone());
             }
         }
-        for (_, net) in outputs.iter() {
-            if !already_decl.contains(net) {
-                writeln!(f, "{}output {};", indent, net.get_identifier().emit_name())?;
-                writeln!(f, "{}wire {};", indent, net.get_identifier().emit_name())?;
-                already_decl.insert(net.clone());
+        for nets in outputs.values() {
+            for net in nets {
+                if !already_decl.contains(net) {
+                    writeln!(f, "{}output {};", indent, net.get_identifier().emit_name())?;
+                    writeln!(f, "{}wire {};", indent, net.get_identifier().emit_name())?;
+                    already_decl.insert(net.clone());
+                }
             }
         }
         for oref in objects.iter() {
@@ -2198,32 +2322,34 @@ where
             }
         }
 
-        for (driver, net) in outputs.iter() {
-            let driver_net = match driver {
-                Operand::DirectIndex(idx) => self.index_weak(idx).borrow().as_net().clone(),
-                Operand::CellIndex(idx, j) => self.index_weak(idx).borrow().get_net(*j).clone(),
-            };
+        for (driver, nets) in outputs.iter() {
+            for net in nets {
+                let driver_net = match driver {
+                    Operand::DirectIndex(idx) => self.index_weak(idx).borrow().as_net().clone(),
+                    Operand::CellIndex(idx, j) => self.index_weak(idx).borrow().get_net(*j).clone(),
+                };
 
-            let driver_str = if let Some(inst_type) = self
-                .index_weak(&driver.root())
-                .borrow()
-                .get()
-                .get_instance_type()
-                && let Some(logic) = inst_type.get_constant()
-            {
-                logic.to_string()
-            } else {
-                driver_net.get_identifier().emit_name()
-            };
+                let driver_str = if let Some(inst_type) = self
+                    .index_weak(&driver.root())
+                    .borrow()
+                    .get()
+                    .get_instance_type()
+                    && let Some(logic) = inst_type.get_constant()
+                {
+                    logic.to_string()
+                } else {
+                    driver_net.get_identifier().emit_name()
+                };
 
-            if net.get_identifier() != driver_net.get_identifier() {
-                writeln!(
-                    f,
-                    "{}assign {} = {};",
-                    indent,
-                    net.get_identifier().emit_name(),
-                    driver_str
-                )?;
+                if net.get_identifier() != driver_net.get_identifier() {
+                    writeln!(
+                        f,
+                        "{}assign {} = {};",
+                        indent,
+                        net.get_identifier().emit_name(),
+                        driver_str
+                    )?;
+                }
             }
         }
 
@@ -2298,7 +2424,6 @@ mod tests {
         DrivenNet::new(1, a.unwrap());
     }
 }
-
 #[cfg(feature = "serde")]
 /// Serde support for netlists
 pub mod serde {
@@ -2309,7 +2434,10 @@ pub mod serde {
     };
     use serde::{Deserialize, Serialize, de::DeserializeOwned};
     use std::cell::RefCell;
-    use std::{collections::HashMap, rc::Rc};
+    use std::{
+        collections::{BTreeSet, HashMap},
+        rc::Rc,
+    };
 
     #[derive(Debug, Serialize, Deserialize)]
     struct SerdeObject<I>
@@ -2367,7 +2495,8 @@ pub mod serde {
         objects: Vec<SerdeObject<I>>,
         /// The list of operands that point to objects which are outputs.
         /// Indices must be a string if we want to support JSON.
-        outputs: HashMap<String, Net>,
+        /// Each operand can map to multiple nets, supporting output aliases.
+        outputs: HashMap<String, BTreeSet<Net>>,
     }
 
     impl<I> From<Netlist<I>> for SerdeNetlist<I>
@@ -2394,7 +2523,7 @@ pub mod serde {
                     .into_inner()
                     .into_iter()
                     // Indices must be a string if we want to support JSON.
-                    .map(|(o, n)| (o.to_string(), n))
+                    .map(|(o, nets)| (o.to_string(), nets.into_iter().collect()))
                     .collect(),
             }
         }
@@ -2407,12 +2536,12 @@ pub mod serde {
         /// Convert the serialized netlist back into a reference-counted netlist.
         fn into_netlist(self) -> Rc<Netlist<I>> {
             let netlist = Netlist::new(self.name);
-            let outputs: HashMap<Operand, Net> = self
+            let outputs: HashMap<Operand, BTreeSet<Net>> = self
                 .outputs
                 .into_iter()
                 .map(|(k, v)| {
                     let operand = k.parse::<Operand>().expect("Invalid index");
-                    (operand, v)
+                    (operand, v.into_iter().collect())
                 })
                 .collect();
             let objects = self
