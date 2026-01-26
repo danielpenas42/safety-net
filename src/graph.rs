@@ -110,12 +110,10 @@ where
     }
 }
 
+/// A simple example to analyze the logic levels of a netlist.
+/// This analysis checks for cycles, but it doesn't check for registers.
 /// Result of combinational depth analysis for a single net.
-///
-/// Each net in the netlist is assigned exactly one `CombDepthResult`,
-/// describing whether its combinational depth is well-defined, undefined,
-/// or part of a combinational cycle.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CombDepthResult {
     /// Signal has no driver
     Undefined,
@@ -132,6 +130,8 @@ pub enum CombDepthResult {
 pub struct SimpleCombDepth<'a, I: Instantiable> {
     _netlist: &'a Netlist<I>,
     results: HashMap<NetRef<I>, CombDepthResult>,
+    /// Max will be None whenever no outputs in the whole netlist have a well defined combinational depth
+    /// for example if they are all undefined or they all partake in a cycle
     max_depth: Option<usize>,
 }
 
@@ -140,8 +140,8 @@ where
     I: Instantiable,
 {
     /// Returns the logic level of a node in the circuit.
-    pub fn get_comb_depth(&self, node: &NetRef<I>) -> &CombDepthResult {
-        &self.results[node]
+    pub fn get_comb_depth(&self, node: &NetRef<I>) -> Option<&CombDepthResult> {
+        self.results.get(node)
     }
 
     /// Returns the maximum logic level of the circuit.
@@ -166,7 +166,7 @@ where
         ) -> CombDepthResult {
             // Memoized result
             if let Some(r) = results.get(&node) {
-                return r.clone();
+                return *r;
             }
 
             // Cycle detection
@@ -180,7 +180,7 @@ where
             // Input nodes have depth 0
             if node.is_an_input() {
                 let r = CombDepthResult::Depth(0);
-                results.insert(node.clone(), r.clone());
+                results.insert(node.clone(), r);
                 return r;
             }
 
@@ -193,7 +193,7 @@ where
                     Some(d) => d,
                     None => {
                         let r = CombDepthResult::Undefined;
-                        results.insert(node.clone(), r.clone());
+                        results.insert(node.clone(), r);
                         visiting.remove(&node);
                         return r;
                     }
@@ -205,13 +205,13 @@ where
                     }
                     CombDepthResult::Undefined => {
                         let r = CombDepthResult::Undefined;
-                        results.insert(node.clone(), r.clone());
+                        results.insert(node.clone(), r);
                         visiting.remove(&node);
                         return r;
                     }
                     CombDepthResult::PartOfCycle => {
                         let r = CombDepthResult::PartOfCycle;
-                        results.insert(node.clone(), r.clone());
+                        results.insert(node.clone(), r);
                         visiting.remove(&node);
                         return r;
                     }
@@ -221,7 +221,7 @@ where
             visiting.remove(&node);
 
             let r = CombDepthResult::Depth(max_depth + 1);
-            results.insert(node.clone(), r.clone());
+            results.insert(node.clone(), r);
             r
         }
 
@@ -232,10 +232,6 @@ where
             if let CombDepthResult::Depth(d) = r {
                 max_depth = Some(max_depth.map_or(d, |m| m.max(d)));
             }
-        }
-
-        for node in netlist.objects() {
-            results.entry(node).or_insert(CombDepthResult::Undefined);
         }
 
         Ok(SimpleCombDepth {
