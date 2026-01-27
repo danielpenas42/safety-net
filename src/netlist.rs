@@ -1608,6 +1608,16 @@ where
             .map(|nr| NetRef::wrap(nr.clone()))
     }
 
+    /// Returns the number of objects in the netlist (instances + inputs)
+    pub fn len(&self) -> usize {
+        self.objects.borrow().len()
+    }
+
+    /// Returns `true` if the netlist contains no objects.
+    pub fn is_empty(&self) -> bool {
+        self.objects.borrow().is_empty()
+    }
+
     /// Returns `true` if an output of `netref` which is driving a module output.
     pub fn drives_an_output(&self, netref: NetRef<I>) -> bool {
         let my_index = netref.unwrap().borrow().get_index();
