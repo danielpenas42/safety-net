@@ -184,6 +184,9 @@ where
                 return r;
             }
 
+            
+
+
             visiting.insert(node.clone());
 
             let mut max_depth = 0;
@@ -198,6 +201,15 @@ where
                         return r;
                     }
                 };
+
+                if let Some(inst) = driver.get_instance_type() {
+                    if inst.is_seq() {
+                        // register output → depth 0, do NOT recurse
+                        max_depth = max_depth.max(0);
+                        continue;
+                    }
+                }
+
 
                 match compute(driver, netlist, results, visiting) {
                     CombDepthResult::Depth(d) => {
@@ -219,11 +231,37 @@ where
             }
 
             visiting.remove(&node);
+            // here r is taht if it is a normal node if node is seq then r = combdepth::(0)
+            // Register nodes reset depth
 
             let r = CombDepthResult::Depth(max_depth + 1);
+            if node
+                .get_instance_type()
+                .map(|inst| inst.is_seq())
+                .unwrap_or(false)
+            {
+                results.insert(node.clone(), CombDepthResult::Depth(0));
+                return CombDepthResult::Depth(max_depth);
+            }
             results.insert(node.clone(), r);
             r
         }
+
+        for node in netlist.objects() {
+            let is_seq = node
+                    .get_instance_type()
+                    .map(|inst| inst.is_seq())
+                    .unwrap_or(false); 
+                if is_seq {
+            
+                    let r = compute(node, netlist, &mut results, &mut visiting);
+
+                    if let CombDepthResult::Depth(d) = r {
+                        max_depth = Some(max_depth.map_or(d, |m| m.max(d)));
+                    }
+                }
+            }
+        
 
         for (driven, _) in netlist.outputs() {
             let node = driven.unwrap();

@@ -5,7 +5,7 @@
 use bitvec::vec::BitVec;
 #[cfg(feature = "derive")]
 use safety_net::{Gate, Netlist, dont_care, format_id};
-use safety_net::{Identifier, Instantiable, Logic, Net, Parameter};
+use safety_net::{Identifier, Instantiable, Logic, Net, Parameter, SimpleCombDepth, CombDepthResult};
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -423,4 +423,135 @@ fn flipflop_test() {
         Some(Parameter::from_bool(true))
     );
     assert!(ff.is_seq());
+}
+
+fn and() -> Gate {
+    Gate::new_logical("AND2".into(), vec!["A".into(), "B".into()], "Y".into())
+}
+
+fn or3() -> Gate {
+    Gate::new_logical(
+        "OR3".into(),
+        vec!["A".into(), "B".into(), "C".into()],
+        "Y".into(),
+    )
+}
+
+fn inv() -> Gate {
+    Gate::new_logical("INV".into(), vec!["A".into()], "Y".into())
+}
+
+#[test]
+fn test_seq_comb_depth_pipeline() {
+    let netlist = Netlist::<Cell>::new("seq_pipeline".to_string());
+
+    // === inputs ===
+    let a = netlist.insert_input("a".into());
+    let b = netlist.insert_input("b".into());
+    let c = netlist.insert_input("c".into());
+
+    let clk   = netlist.insert_input("clk".into());
+    let ce    = netlist.insert_input("ce".into());
+    let rst   = netlist.insert_input("rst".into());
+
+    // === BEFORE reg1 (depth 1,2,3) ===
+    let n1 = netlist
+        .insert_gate(Cell::Gate(inv()), "inv1".into(), &[a.clone()])
+        .unwrap()
+        .get_output(0);
+
+    let n2 = netlist
+        .insert_gate(Cell::Gate(and()), "and1".into(), &[n1.clone(), b.clone()])
+        .unwrap()
+        .get_output(0);
+
+    let n3 = netlist
+        .insert_gate(Cell::Gate(inv()), "inv2".into(), &[n2.clone()])
+        .unwrap()
+        .get_output(0);
+
+    // === reg1 ===
+    let reg1 = netlist
+        .insert_gate(
+            Cell::FlipFlop(FlipFlop::new(FlopVariant::FDRE, Logic::False)),
+            "reg1".into(),
+            &[clk.clone(), ce.clone(), rst.clone(), n3.clone()],
+        )
+        .unwrap();
+
+    let q1 = reg1.get_output(0); // depth resets to 0
+
+    // === BETWEEN reg1 and reg2 (depth 1..4) ===
+    let n4 = netlist
+        .insert_gate(Cell::Gate(inv()), "inv3".into(), &[q1.clone()])
+        .unwrap()
+        .get_output(0);
+
+    let n5 = netlist
+        .insert_gate(Cell::Gate(and()), "and2".into(), &[n4.clone(), c.clone()])
+        .unwrap()
+        .get_output(0);
+
+    let n6 = netlist
+        .insert_gate(
+            Cell::Gate(or3()),
+            "or1".into(),
+            &[n5.clone(), q1.clone(), a.clone()],
+        )
+        .unwrap()
+        .get_output(0);
+
+    let n7 = netlist
+        .insert_gate(Cell::Gate(inv()), "inv4".into(), &[n6.clone()])
+        .unwrap()
+        .get_output(0);
+
+    // === reg2 ===
+    let reg2 = netlist
+        .insert_gate(
+            Cell::FlipFlop(FlipFlop::new(FlopVariant::FDRE, Logic::False)),
+            "reg2".into(),
+            &[clk.clone(), ce.clone(), rst.clone(), n7.clone()],
+        )
+        .unwrap();
+
+    let q2 = reg2.get_output(0); // reset again
+
+    // === AFTER reg2 (depth 1,2) ===
+    let n8 = netlist
+        .insert_gate(Cell::Gate(inv()), "inv5".into(), &[q2.clone()])
+        .unwrap()
+        .get_output(0);
+
+    let n9 = netlist
+        .insert_gate(Cell::Gate(and()), "and3".into(), &[n8.clone(), b.clone()])
+        .unwrap()
+        .get_output(0);
+
+    netlist.last().unwrap().expose_with_name("y".into());
+
+    // === run analysis ===
+    let depth_info = netlist.get_analysis::<SimpleCombDepth<_>>().unwrap();
+
+    // BEFORE reg1
+    assert_eq!(depth_info.get_comb_depth(&n1.unwrap().into()), Some(CombDepthResult::Depth(1)));
+    assert_eq!(depth_info.get_comb_depth(&n2.unwrap().into()), Some(CombDepthResult::Depth(2)));
+    assert_eq!(depth_info.get_comb_depth(&n3.unwrap().into()), Some(CombDepthResult::Depth(3)));
+
+    // reg outputs reset
+    assert_eq!(depth_info.get_comb_depth(&q1.unwrap().into()), Some(CombDepthResult::Depth(0)));
+    assert_eq!(depth_info.get_comb_depth(&q2.unwrap().into()), Some(CombDepthResult::Depth(0)));
+
+    // between regs
+    assert_eq!(depth_info.get_comb_depth(&n4.unwrap().into()), Some(CombDepthResult::Depth(1)));
+    assert_eq!(depth_info.get_comb_depth(&n5.unwrap().into()), Some(CombDepthResult::Depth(2)));
+    assert_eq!(depth_info.get_comb_depth(&n6.unwrap().into()), Some(CombDepthResult::Depth(3)));
+    assert_eq!(depth_info.get_comb_depth(&n7.unwrap().into()), Some(CombDepthResult::Depth(4)));
+
+    // after reg2
+    assert_eq!(depth_info.get_comb_depth(&n8.unwrap().into()), Some(CombDepthResult::Depth(1)));
+    assert_eq!(depth_info.get_comb_depth(&n9.unwrap().into()), Some(CombDepthResult::Depth(2)));
+
+    // max across all combinational regions
+    assert_eq!(depth_info.get_max_depth(), Some(4));
 }
