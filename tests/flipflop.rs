@@ -4,8 +4,8 @@
 #[cfg(feature = "derive")]
 use bitvec::vec::BitVec;
 #[cfg(feature = "derive")]
-use safety_net::{Gate, Netlist, dont_care, format_id};
-use safety_net::{Identifier, Instantiable, Logic, Net, Parameter, SimpleCombDepth, CombDepthResult};
+use safety_net::{Gate, Netlist, SimpleCombDepth, CombDepthResult, dont_care, format_id};
+use safety_net::{Identifier, Instantiable, Logic, Net, Parameter};
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -425,10 +425,12 @@ fn flipflop_test() {
     assert!(ff.is_seq());
 }
 
+#[cfg(feature = "derive")]
 fn and() -> Gate {
     Gate::new_logical("AND2".into(), vec!["A".into(), "B".into()], "Y".into())
 }
 
+#[cfg(feature = "derive")]
 fn or3() -> Gate {
     Gate::new_logical(
         "OR3".into(),
@@ -437,11 +439,13 @@ fn or3() -> Gate {
     )
 }
 
+#[cfg(feature = "derive")]
 fn inv() -> Gate {
     Gate::new_logical("INV".into(), vec!["A".into()], "Y".into())
 }
 
 #[test]
+#[cfg(feature = "derive")]
 fn test_seq_comb_depth_pipeline() {
     let netlist = Netlist::<Cell>::new("seq_pipeline".to_string());
 
