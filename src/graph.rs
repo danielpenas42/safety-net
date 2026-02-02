@@ -202,8 +202,6 @@ where
                 if let Some(inst) = driver.get_instance_type()
                     && inst.is_seq()
                 {
-                    // register output → depth 0, do NOT recurse
-                    max_depth = max_depth.max(0);
                     continue;
                 }
 
@@ -227,32 +225,9 @@ where
             }
 
             visiting.remove(&node);
-
             let r = CombDepthResult::Depth(max_depth + 1);
-            if node
-                .get_instance_type()
-                .map(|inst| inst.is_seq())
-                .unwrap_or(false)
-            {
-                results.insert(node.clone(), CombDepthResult::Depth(0));
-                return CombDepthResult::Depth(max_depth);
-            }
             results.insert(node.clone(), r);
             r
-        }
-
-        for node in netlist.objects() {
-            let is_seq = node
-                .get_instance_type()
-                .map(|inst| inst.is_seq())
-                .unwrap_or(false);
-            if is_seq {
-                let r = compute(node, netlist, &mut results, &mut visiting);
-
-                if let CombDepthResult::Depth(d) = r {
-                    max_depth = Some(max_depth.map_or(d, |m| m.max(d)));
-                }
-            }
         }
 
         for (driven, _) in netlist.outputs() {
@@ -261,6 +236,24 @@ where
 
             if let CombDepthResult::Depth(d) = r {
                 max_depth = Some(max_depth.map_or(d, |m| m.max(d)));
+            }
+        }
+
+        for node in netlist.objects() {
+            if node.get_instance_type().is_some_and(|inst| inst.is_seq()) {
+                results.insert(node.clone(), CombDepthResult::Depth(0));
+                for i in 0..node.get_num_input_ports() {
+                    if let Some(driver) = netlist.get_driver(node.clone(), i) {
+                        if driver.get_instance_type().is_some_and(|inst| inst.is_seq()) {
+                            continue;
+                        }
+
+                        let r = compute(driver, netlist, &mut results, &mut visiting);
+                        if let CombDepthResult::Depth(d) = r {
+                            max_depth = Some(max_depth.map_or(d, |m| m.max(d)));
+                        }
+                    }
+                }
             }
         }
 
