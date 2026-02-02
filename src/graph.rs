@@ -227,8 +227,6 @@ where
             }
 
             visiting.remove(&node);
-            // here r is taht if it is a normal node if node is seq then r = combdepth::(0)
-            // Register nodes reset depth
 
             let r = CombDepthResult::Depth(max_depth + 1);
             if node
