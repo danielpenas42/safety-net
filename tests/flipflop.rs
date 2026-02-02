@@ -4,7 +4,7 @@
 #[cfg(feature = "derive")]
 use bitvec::vec::BitVec;
 #[cfg(feature = "derive")]
-use safety_net::{Gate, Netlist, SimpleCombDepth, CombDepthResult, dont_care, format_id};
+use safety_net::{CombDepthResult, Gate, Netlist, SimpleCombDepth, dont_care, format_id};
 use safety_net::{Identifier, Instantiable, Logic, Net, Parameter};
 
 #[derive(Debug, Clone)]
@@ -454,9 +454,9 @@ fn test_seq_comb_depth_pipeline() {
     let b = netlist.insert_input("b".into());
     let c = netlist.insert_input("c".into());
 
-    let clk   = netlist.insert_input("clk".into());
-    let ce    = netlist.insert_input("ce".into());
-    let rst   = netlist.insert_input("rst".into());
+    let clk = netlist.insert_input("clk".into());
+    let ce = netlist.insert_input("ce".into());
+    let rst = netlist.insert_input("rst".into());
 
     // === BEFORE reg1 (depth 1,2,3) ===
     let n1 = netlist
@@ -538,23 +538,56 @@ fn test_seq_comb_depth_pipeline() {
     let depth_info = netlist.get_analysis::<SimpleCombDepth<_>>().unwrap();
 
     // BEFORE reg1
-    assert_eq!(depth_info.get_comb_depth(&n1.unwrap().into()), Some(CombDepthResult::Depth(1)));
-    assert_eq!(depth_info.get_comb_depth(&n2.unwrap().into()), Some(CombDepthResult::Depth(2)));
-    assert_eq!(depth_info.get_comb_depth(&n3.unwrap().into()), Some(CombDepthResult::Depth(3)));
+    assert_eq!(
+        depth_info.get_comb_depth(&n1.unwrap().into()),
+        Some(CombDepthResult::Depth(1))
+    );
+    assert_eq!(
+        depth_info.get_comb_depth(&n2.unwrap().into()),
+        Some(CombDepthResult::Depth(2))
+    );
+    assert_eq!(
+        depth_info.get_comb_depth(&n3.unwrap().into()),
+        Some(CombDepthResult::Depth(3))
+    );
 
     // reg outputs reset
-    assert_eq!(depth_info.get_comb_depth(&q1.unwrap().into()), Some(CombDepthResult::Depth(0)));
-    assert_eq!(depth_info.get_comb_depth(&q2.unwrap().into()), Some(CombDepthResult::Depth(0)));
+    assert_eq!(
+        depth_info.get_comb_depth(&q1.unwrap().into()),
+        Some(CombDepthResult::Depth(0))
+    );
+    assert_eq!(
+        depth_info.get_comb_depth(&q2.unwrap().into()),
+        Some(CombDepthResult::Depth(0))
+    );
 
     // between regs
-    assert_eq!(depth_info.get_comb_depth(&n4.unwrap().into()), Some(CombDepthResult::Depth(1)));
-    assert_eq!(depth_info.get_comb_depth(&n5.unwrap().into()), Some(CombDepthResult::Depth(2)));
-    assert_eq!(depth_info.get_comb_depth(&n6.unwrap().into()), Some(CombDepthResult::Depth(3)));
-    assert_eq!(depth_info.get_comb_depth(&n7.unwrap().into()), Some(CombDepthResult::Depth(4)));
+    assert_eq!(
+        depth_info.get_comb_depth(&n4.unwrap().into()),
+        Some(CombDepthResult::Depth(1))
+    );
+    assert_eq!(
+        depth_info.get_comb_depth(&n5.unwrap().into()),
+        Some(CombDepthResult::Depth(2))
+    );
+    assert_eq!(
+        depth_info.get_comb_depth(&n6.unwrap().into()),
+        Some(CombDepthResult::Depth(3))
+    );
+    assert_eq!(
+        depth_info.get_comb_depth(&n7.unwrap().into()),
+        Some(CombDepthResult::Depth(4))
+    );
 
     // after reg2
-    assert_eq!(depth_info.get_comb_depth(&n8.unwrap().into()), Some(CombDepthResult::Depth(1)));
-    assert_eq!(depth_info.get_comb_depth(&n9.unwrap().into()), Some(CombDepthResult::Depth(2)));
+    assert_eq!(
+        depth_info.get_comb_depth(&n8.unwrap().into()),
+        Some(CombDepthResult::Depth(1))
+    );
+    assert_eq!(
+        depth_info.get_comb_depth(&n9.unwrap().into()),
+        Some(CombDepthResult::Depth(2))
+    );
 
     // max across all combinational regions
     assert_eq!(depth_info.get_max_depth(), Some(4));
