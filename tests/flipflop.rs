@@ -639,7 +639,7 @@ mod flipflop {
         // NOT a combinational loop
         assert_ne!(
             depth_info.get_comb_depth(&inv),
-            Some(CombDepthResult::PartOfCycle)
+            Some(CombDepthResult::CombCycle)
         );
     }
 }

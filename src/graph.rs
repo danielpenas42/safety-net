@@ -118,7 +118,7 @@ pub enum CombDepthResult {
     /// Signal has no driver
     Undefined,
     /// Signal is along a cycle
-    PartOfCycle,
+    CombCycle,
     /// Integer logic level
     Depth(usize),
 }
@@ -172,9 +172,9 @@ where
             // Cycle detection
             if visiting.contains(&node) {
                 for n in visiting.iter() {
-                    results.insert(n.clone(), CombDepthResult::PartOfCycle);
+                    results.insert(n.clone(), CombDepthResult::CombCycle);
                 }
-                return CombDepthResult::PartOfCycle;
+                return CombDepthResult::CombCycle;
             }
 
             // Input nodes have depth 0
@@ -215,8 +215,8 @@ where
                         visiting.remove(&node);
                         return r;
                     }
-                    CombDepthResult::PartOfCycle => {
-                        let r = CombDepthResult::PartOfCycle;
+                    CombDepthResult::CombCycle => {
+                        let r = CombDepthResult::CombCycle;
                         results.insert(node.clone(), r);
                         visiting.remove(&node);
                         return r;
