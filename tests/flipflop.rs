@@ -460,7 +460,7 @@ fn test_seq_comb_depth_pipeline() {
 
     // === BEFORE reg1 (depth 1,2,3) ===
     let n1 = netlist
-        .insert_gate(Cell::Gate(inv()), "inv1".into(), &[a.clone()])
+        .insert_gate(Cell::Gate(inv()), "inv1".into(), std::slice::from_ref(&a))
         .unwrap()
         .get_output(0);
 
@@ -470,7 +470,7 @@ fn test_seq_comb_depth_pipeline() {
         .get_output(0);
 
     let n3 = netlist
-        .insert_gate(Cell::Gate(inv()), "inv2".into(), &[n2.clone()])
+        .insert_gate(Cell::Gate(inv()), "inv2".into(), std::slice::from_ref(&n2))
         .unwrap()
         .get_output(0);
 
@@ -487,7 +487,7 @@ fn test_seq_comb_depth_pipeline() {
 
     // === BETWEEN reg1 and reg2 (depth 1..4) ===
     let n4 = netlist
-        .insert_gate(Cell::Gate(inv()), "inv3".into(), &[q1.clone()])
+        .insert_gate(Cell::Gate(inv()), "inv3".into(), std::slice::from_ref(&q1))
         .unwrap()
         .get_output(0);
 
@@ -506,7 +506,7 @@ fn test_seq_comb_depth_pipeline() {
         .get_output(0);
 
     let n7 = netlist
-        .insert_gate(Cell::Gate(inv()), "inv4".into(), &[n6.clone()])
+        .insert_gate(Cell::Gate(inv()), "inv4".into(), std::slice::from_ref(&n6))
         .unwrap()
         .get_output(0);
 
@@ -523,7 +523,7 @@ fn test_seq_comb_depth_pipeline() {
 
     // === AFTER reg2 (depth 1,2) ===
     let n8 = netlist
-        .insert_gate(Cell::Gate(inv()), "inv5".into(), &[q2.clone()])
+        .insert_gate(Cell::Gate(inv()), "inv5".into(), std::slice::from_ref(&q2))
         .unwrap()
         .get_output(0);
 
@@ -539,53 +539,53 @@ fn test_seq_comb_depth_pipeline() {
 
     // BEFORE reg1
     assert_eq!(
-        depth_info.get_comb_depth(&n1.unwrap().into()),
+        depth_info.get_comb_depth(&n1.unwrap()),
         Some(CombDepthResult::Depth(1))
     );
     assert_eq!(
-        depth_info.get_comb_depth(&n2.unwrap().into()),
+        depth_info.get_comb_depth(&n2.unwrap()),
         Some(CombDepthResult::Depth(2))
     );
     assert_eq!(
-        depth_info.get_comb_depth(&n3.unwrap().into()),
+        depth_info.get_comb_depth(&n3.unwrap()),
         Some(CombDepthResult::Depth(3))
     );
 
     // reg outputs reset
     assert_eq!(
-        depth_info.get_comb_depth(&q1.unwrap().into()),
+        depth_info.get_comb_depth(&q1.unwrap()),
         Some(CombDepthResult::Depth(0))
     );
     assert_eq!(
-        depth_info.get_comb_depth(&q2.unwrap().into()),
+        depth_info.get_comb_depth(&q2.unwrap()),
         Some(CombDepthResult::Depth(0))
     );
 
     // between regs
     assert_eq!(
-        depth_info.get_comb_depth(&n4.unwrap().into()),
+        depth_info.get_comb_depth(&n4.unwrap()),
         Some(CombDepthResult::Depth(1))
     );
     assert_eq!(
-        depth_info.get_comb_depth(&n5.unwrap().into()),
+        depth_info.get_comb_depth(&n5.unwrap()),
         Some(CombDepthResult::Depth(2))
     );
     assert_eq!(
-        depth_info.get_comb_depth(&n6.unwrap().into()),
+        depth_info.get_comb_depth(&n6.unwrap()),
         Some(CombDepthResult::Depth(3))
     );
     assert_eq!(
-        depth_info.get_comb_depth(&n7.unwrap().into()),
+        depth_info.get_comb_depth(&n7.unwrap()),
         Some(CombDepthResult::Depth(4))
     );
 
     // after reg2
     assert_eq!(
-        depth_info.get_comb_depth(&n8.unwrap().into()),
+        depth_info.get_comb_depth(&n8.unwrap()),
         Some(CombDepthResult::Depth(1))
     );
     assert_eq!(
-        depth_info.get_comb_depth(&n9.unwrap().into()),
+        depth_info.get_comb_depth(&n9.unwrap()),
         Some(CombDepthResult::Depth(2))
     );
 
