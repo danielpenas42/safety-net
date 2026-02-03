@@ -239,19 +239,17 @@ where
             }
         }
 
-        for node in netlist.objects() {
-            if node.get_instance_type().is_some_and(|inst| inst.is_seq()) {
-                results.insert(node.clone(), CombDepthResult::Depth(0));
-                for i in 0..node.get_num_input_ports() {
-                    if let Some(driver) = netlist.get_driver(node.clone(), i) {
-                        if driver.get_instance_type().is_some_and(|inst| inst.is_seq()) {
-                            continue;
-                        }
+        for node in netlist.matches(|inst| inst.is_seq()) {
+            results.insert(node.clone(), CombDepthResult::Depth(0));
+            for i in 0..node.get_num_input_ports() {
+                if let Some(driver) = netlist.get_driver(node.clone(), i) {
+                    if driver.get_instance_type().is_some_and(|inst| inst.is_seq()) {
+                        continue;
+                    }
 
-                        let r = compute(driver, netlist, &mut results, &mut visiting);
-                        if let CombDepthResult::Depth(d) = r {
-                            max_depth = Some(max_depth.map_or(d, |m| m.max(d)));
-                        }
+                    let r = compute(driver, netlist, &mut results, &mut visiting);
+                    if let CombDepthResult::Depth(d) = r {
+                        max_depth = Some(max_depth.map_or(d, |m| m.max(d)));
                     }
                 }
             }
