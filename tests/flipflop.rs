@@ -746,4 +746,62 @@ mod flipflop {
 
         assert_eq!(depth_info.get_max_depth(), Some(3));
     }
+
+    #[test]
+    fn test_clk_div2_disconnected() {
+        let netlist = Netlist::<Cell>::new("clk_div2".to_string());
+
+        // === inputs ===
+        let clk = netlist.insert_input("clk".into());
+        let ce = netlist.insert_input("ce".into());
+        let rst = netlist.insert_input("rst".into());
+
+        let ff = netlist.insert_gate_disconnected(
+            Cell::FlipFlop(FlipFlop::new(FlopVariant::FDRE, Logic::False)),
+            "ff".into(),
+        );
+        let ff_clone = ff.clone();
+
+        let inv = netlist.insert_gate_disconnected(Cell::Gate(inv()), "inv".into());
+
+        // === ports ===
+        let q = ff.get_output(0);
+        let inv_in = inv.find_input(&"A".into()).unwrap();
+        let inv_out = inv.get_output(0);
+
+        // === wire sequential feedback ===
+        inv_in.clone().connect(q);
+        ff.find_input(&"D".into()).unwrap().connect(inv_out);
+
+        // === wire remaining FF inputs ===
+        ff.find_input(&"C".into()).unwrap().connect(clk);
+        ff.find_input(&"CE".into()).unwrap().connect(ce);
+        ff.find_input(&"R".into()).unwrap().connect(rst);
+
+        // === expose output ===
+        ff_clone.expose_with_name("clk_div2".into());
+
+        inv_in.disconnect();
+
+        // === run comb depth analysis ===
+        let depth_info = netlist.get_analysis::<SimpleCombDepth<_>>().unwrap();
+
+        // inverter is combinational depth 1
+        assert_eq!(
+            depth_info.get_comb_depth(&inv),
+            Some(CombDepthResult::Undefined)
+        );
+
+        // FF output breaks combinational depth
+        assert_eq!(
+            depth_info.get_comb_depth(&ff),
+            Some(CombDepthResult::Depth(0))
+        );
+
+        // NOT a combinational loop
+        assert_ne!(
+            depth_info.get_comb_depth(&inv),
+            Some(CombDepthResult::CombCycle)
+        );
+    }
 }
