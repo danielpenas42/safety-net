@@ -100,10 +100,10 @@ fn test_comb_loop() {
 
     let gate = netlist.last().unwrap();
 
-    // The gate is part of a loop, so it should return CombDepthResult::PartofCycle
+    // The gate is part of a loop, so it should return CombDepthResult::CombCycle
     assert_eq!(
         depth_info.get_comb_depth(&gate),
-        Some(CombDepthResult::PartOfCycle)
+        Some(CombDepthResult::CombCycle)
     );
 
     let input = netlist.inputs().next().unwrap();
@@ -227,6 +227,6 @@ fn test_comb_depth_cycle() {
 
     assert_eq!(
         depth_info.get_comb_depth(&inv_node).unwrap(),
-        CombDepthResult::PartOfCycle
+        CombDepthResult::CombCycle
     );
 }
