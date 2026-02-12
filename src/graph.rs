@@ -194,7 +194,7 @@ where
                     Some(d) => d,
                     None => {
                         is_undefined = true;
-                        continue
+                        continue;
                     }
                 };
 
@@ -219,7 +219,7 @@ where
                     }
                 }
             }
-       
+
             visiting.remove(&node);
             let r = if is_undefined {
                 CombDepthResult::Undefined

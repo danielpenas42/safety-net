@@ -868,8 +868,6 @@ mod flipflop {
         let and_in1 = and2.get_input(0);
         and_in1.disconnect();
 
-
-
         let depth_info = netlist.get_analysis::<SimpleCombDepth<_>>().unwrap();
 
         assert_eq!(
@@ -910,144 +908,92 @@ mod flipflop {
         assert_eq!(depth_info.get_max_depth(), Some(1));
     }
 
+    #[test]
+    fn test_two_sequential_loops_partial_break() {
+        let netlist = Netlist::<Cell>::new("two_seq_loops".to_string());
 
-#[test]
-fn test_two_sequential_loops_partial_break() {
-    let netlist = Netlist::<Cell>::new("two_seq_loops".to_string());
+        let clk = netlist.insert_input("clk".into());
+        let ce = netlist.insert_input("ce".into());
+        let rst = netlist.insert_input("rst".into());
+        let in1 = netlist.insert_input("in1".into());
+        let in2 = netlist.insert_input("in2".into());
 
-    // === inputs ===
-    let clk = netlist.insert_input("clk".into());
-    let ce  = netlist.insert_input("ce".into());
-    let rst = netlist.insert_input("rst".into());
-    let in1 = netlist.insert_input("in1".into());
-    let in2 = netlist.insert_input("in2".into());
+        let ff1 = netlist.insert_gate_disconnected(
+            Cell::FlipFlop(FlipFlop::new(FlopVariant::FDRE, Logic::False)),
+            "ff1".into(),
+        );
 
-    // === flip-flops ===
-    let ff1 = netlist.insert_gate_disconnected(
-        Cell::FlipFlop(FlipFlop::new(FlopVariant::FDRE, Logic::False)),
-        "ff1".into(),
-    );
+        let ff2 = netlist.insert_gate_disconnected(
+            Cell::FlipFlop(FlipFlop::new(FlopVariant::FDRE, Logic::False)),
+            "ff2".into(),
+        );
 
-    let ff2 = netlist.insert_gate_disconnected(
-        Cell::FlipFlop(FlipFlop::new(FlopVariant::FDRE, Logic::False)),
-        "ff2".into(),
-    );
+        let and1 = netlist.insert_gate_disconnected(Cell::Gate(and()), "and1".into());
+        let or1 = netlist.insert_gate_disconnected(Cell::Gate(or2()), "or1".into());
 
-    // === combinational gates ===
-    let and1 = netlist.insert_gate_disconnected(Cell::Gate(and()), "and1".into());
-    let or1  = netlist.insert_gate_disconnected(Cell::Gate(or2()), "or1".into());
+        let and2 = netlist.insert_gate_disconnected(Cell::Gate(and()), "and2".into());
+        let or2 = netlist.insert_gate_disconnected(Cell::Gate(or2()), "or2".into());
 
-    let and2 = netlist.insert_gate_disconnected(Cell::Gate(and()), "and2".into());
-    let or2  = netlist.insert_gate_disconnected(Cell::Gate(or2()), "or2".into());
+        let ff1_q = ff1.get_output(0);
+        ff1_q.connect(and1.get_input(0));
+        in1.connect(and1.get_input(1));
 
-    // =========================================================
-    // Loop A: ff1 → and1 → or1 → ff2
-    // =========================================================
+        let and1_out = and1.get_output(0);
+        and1_out.connect(or1.get_input(0));
+        in2.connect(or1.get_input(1));
 
-    let ff1_q = ff1.get_output(0);
-    ff1_q.connect(and1.get_input(0));
-    in1.connect(and1.get_input(1));
+        let or1_out = or1.get_output(0);
+        or1_out.connect(ff2.find_input(&"D".into()).unwrap());
 
-    let and1_out = and1.get_output(0);
-    and1_out.connect(or1.get_input(0));
-    in2.connect(or1.get_input(1));
+        let ff2_q = ff2.get_output(0);
+        ff2_q.connect(and2.get_input(0));
+        in1.connect(and2.get_input(1)); // will disconnect this later
 
-    let or1_out = or1.get_output(0);
-    or1_out.connect(ff2.find_input(&"D".into()).unwrap());
+        let and2_out = and2.get_output(0);
+        and2_out.connect(or2.get_input(0));
+        in2.connect(or2.get_input(1));
 
-    // =========================================================
-    // Loop B: ff2 → and2 → or2 → ff1
-    // =========================================================
+        let or2_out = or2.get_output(0);
+        or2_out.connect(ff1.find_input(&"D".into()).unwrap());
 
-    let ff2_q = ff2.get_output(0);
-    ff2_q.connect(and2.get_input(0));
-    in1.connect(and2.get_input(1));   // will disconnect this later
+        ff1.find_input(&"C".into()).unwrap().connect(clk.clone());
+        ff1.find_input(&"CE".into()).unwrap().connect(ce.clone());
+        ff1.find_input(&"R".into()).unwrap().connect(rst.clone());
 
-    let and2_out = and2.get_output(0);
-    and2_out.connect(or2.get_input(0));
-    in2.connect(or2.get_input(1));
+        ff2.find_input(&"C".into()).unwrap().connect(clk);
+        ff2.find_input(&"CE".into()).unwrap().connect(ce);
+        ff2.find_input(&"R".into()).unwrap().connect(rst);
 
-    let or2_out = or2.get_output(0);
-    or2_out.connect(ff1.find_input(&"D".into()).unwrap());
+        let broken_input = and2.get_input(1);
+        broken_input.disconnect();
 
-    // =========================================================
-    // Clocking
-    // =========================================================
+        let depth_info = netlist.get_analysis::<SimpleCombDepth<_>>().unwrap();
 
-    ff1.find_input(&"C".into()).unwrap().connect(clk.clone());
-    ff1.find_input(&"CE".into()).unwrap().connect(ce.clone());
-    ff1.find_input(&"R".into()).unwrap().connect(rst.clone());
+        assert_eq!(
+            depth_info.get_comb_depth(&and1),
+            Some(CombDepthResult::Depth(1))
+        );
 
-    ff2.find_input(&"C".into()).unwrap().connect(clk);
-    ff2.find_input(&"CE".into()).unwrap().connect(ce);
-    ff2.find_input(&"R".into()).unwrap().connect(rst);
+        assert_eq!(
+            depth_info.get_comb_depth(&or1),
+            Some(CombDepthResult::Depth(2))
+        );
 
-    // =========================================================
-    // BREAK LOOP B
-    // =========================================================
+        assert_eq!(
+            depth_info.get_comb_depth(&and2),
+            Some(CombDepthResult::Undefined)
+        );
 
-    let broken_input = and2.get_input(1);
-    broken_input.disconnect();
+        assert_eq!(
+            depth_info.get_comb_depth(&or2),
+            Some(CombDepthResult::Undefined)
+        );
 
+        assert_ne!(
+            depth_info.get_comb_depth(&and1),
+            Some(CombDepthResult::CombCycle)
+        );
 
-
-    let depth_info = netlist.get_analysis::<SimpleCombDepth<_>>().unwrap();
-
-    // ---------------------------------------------------------
-    // Flip-flops always depth 0
-    // ---------------------------------------------------------
-
-    assert_eq!(
-        depth_info.get_comb_depth(&ff1),
-        Some(CombDepthResult::Depth(0))
-    );
-
-    assert_eq!(
-        depth_info.get_comb_depth(&ff2),
-        Some(CombDepthResult::Depth(0))
-    );
-
-    // ---------------------------------------------------------
-    // Loop A remains valid
-    // ---------------------------------------------------------
-
-    assert_eq!(
-        depth_info.get_comb_depth(&and1),
-        Some(CombDepthResult::Depth(1))
-    );
-
-    assert_eq!(
-        depth_info.get_comb_depth(&or1),
-        Some(CombDepthResult::Depth(2))
-    );
-
-    // ---------------------------------------------------------
-    // Loop B becomes Undefined
-    // ---------------------------------------------------------
-
-    assert_eq!(
-        depth_info.get_comb_depth(&and2),
-        Some(CombDepthResult::Undefined)
-    );
-
-    assert_eq!(
-        depth_info.get_comb_depth(&or2),
-        Some(CombDepthResult::Undefined)
-    );
-
-    // ---------------------------------------------------------
-    // No combinational cycle
-    // ---------------------------------------------------------
-
-    assert_ne!(
-        depth_info.get_comb_depth(&and1),
-        Some(CombDepthResult::CombCycle)
-    );
-
-    // ---------------------------------------------------------
-    // Max depth comes only from Loop A
-    // ---------------------------------------------------------
-
-    assert_eq!(depth_info.get_max_depth(), Some(2));
+        assert_eq!(depth_info.get_max_depth(), Some(2));
     }
 }
