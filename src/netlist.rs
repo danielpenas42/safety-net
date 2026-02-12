@@ -1670,14 +1670,30 @@ where
 
     /// Rename nets and instances in the netlist using the provided *injective* function.
     /// Returns an error if the function is not injective.
-    pub fn rename_nets<F: Fn(usize) -> Identifier>(&self, f: F) -> Result<(), Error> {
+    /// # Examples
+    ///
+    /// ```
+    /// use safety_net::format_id;
+    /// use safety_net::{Gate, GateNetlist};
+    ///
+    /// let netlist = GateNetlist::new("example".to_string());
+    /// let inv = Gate::new_logical("INV".into(), vec!["A".into()], "Y".into());
+    /// let foo = netlist.insert_input("foo".into());
+    /// let nr = netlist.insert_gate(inv, "bar".into(), &[foo]).unwrap();
+    /// nr.expose_with_name("baz".into());
+    /// netlist.rename_nets(|id, i| format_id!("{}_{}", id, i) ).unwrap();
+    /// // "bar_Y" -> "bar_Y_0"
+    /// // "bar" -> "bar_1"
+    /// ```
+    pub fn rename_nets<F: Fn(&Identifier, usize) -> Identifier>(&self, f: F) -> Result<(), Error> {
         let mut i: usize = 0;
         for nr in self.objects() {
             if nr.is_an_input() {
                 continue;
             }
             for mut net in nr.nets_mut() {
-                net.set_identifier(f(i));
+                let rename = f(net.get_identifier(), i);
+                net.set_identifier(rename);
                 i += 1;
             }
         }
@@ -1687,15 +1703,16 @@ where
                 continue;
             }
 
-            nr.set_instance_name(f(i));
+            let rename = f(&nr.get_instance_name().unwrap(), i);
+            nr.set_instance_name(rename);
             i += 1;
         }
 
         self.verify()
     }
 
-    /// Cleans unused nodes from the netlist, returning `Ok(true)` if the netlist changed.
-    pub fn clean_once(&self) -> Result<bool, Error> {
+    /// Cleans unused nodes from the netlist, returning `Ok(vec)` of the removed objects.
+    pub fn clean_once(&self) -> Result<Vec<Object<I>>, Error> {
         let mut dead_objs = HashSet::new();
         {
             let fan_out = self.get_analysis::<FanOutTable<I>>()?;
@@ -1715,7 +1732,7 @@ where
         }
 
         if dead_objs.is_empty() {
-            return Ok(false);
+            return Ok(vec![]);
         }
 
         let old_objects = self.objects.take();
@@ -1731,9 +1748,11 @@ where
             }
         }
 
+        let mut removed = Vec::new();
         let mut remap: HashMap<usize, usize> = HashMap::new();
         for (old_index, obj) in old_objects.into_iter().enumerate() {
             if dead_objs.contains(&old_index) {
+                removed.push(obj.borrow().get().clone());
                 continue;
             }
 
@@ -1759,21 +1778,19 @@ where
             self.outputs.borrow_mut().insert(new_operand, net);
         }
 
-        Ok(true)
+        Ok(removed)
     }
 
     /// Greedly removes unused nodes from the netlist, until it stops changing.
-    /// Returns true if the netlist was changed.
-    pub fn clean(&self) -> Result<bool, Error> {
-        if !self.clean_once()? {
-            Ok(false)
-        } else {
-            let mut changed = true;
-            while changed {
-                changed = self.clean_once()?;
-            }
-            Ok(true)
+    /// Returns `Ok(vec)` of the removed objects.
+    pub fn clean(&self) -> Result<Vec<Object<I>>, Error> {
+        let mut removed = Vec::new();
+        let mut r = self.clean_once()?;
+        while !r.is_empty() {
+            removed.extend(r);
+            r = self.clean_once()?;
         }
+        Ok(removed)
     }
 
     /// Returns `true` if all the nets are uniquely named
@@ -2050,10 +2067,7 @@ pub mod iter {
     /// }
     /// ```
     pub struct DFSIterator<'a, I: Instantiable> {
-        netlist: &'a Netlist<I>,
-        stacks: Vec<Walk<NetRef<I>>>,
-        visited: HashSet<usize>,
-        cycles: bool,
+        dfs: NetDFSIterator<'a, I>,
     }
 
     impl<'a, I> DFSIterator<'a, I>
@@ -2062,6 +2076,59 @@ pub mod iter {
     {
         /// Create a new DFS iterator for the netlist starting at `from`.
         pub fn new(netlist: &'a Netlist<I>, from: NetRef<I>) -> Self {
+            let mut s = Walk::new();
+            s.push(DrivenNet::new(0, from));
+            Self {
+                dfs: NetDFSIterator {
+                    netlist,
+                    stacks: vec![s],
+                    visited: HashSet::new(),
+                    cycles: false,
+                },
+            }
+        }
+    }
+
+    impl<I> DFSIterator<'_, I>
+    where
+        I: Instantiable,
+    {
+        /// Check if the DFS traversal has encountered a cycle yet.
+        pub fn check_cycles(&self) -> bool {
+            self.dfs.check_cycles()
+        }
+
+        /// Consumes the iterator to detect cycles in the netlist.
+        pub fn detect_cycles(self) -> bool {
+            self.dfs.detect_cycles()
+        }
+    }
+
+    impl<I> Iterator for DFSIterator<'_, I>
+    where
+        I: Instantiable,
+    {
+        type Item = NetRef<I>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.dfs.next().map(|d| d.unwrap())
+        }
+    }
+
+    /// Depth-first iterator that works like DFSIterator but iterates over DrivenNet
+    pub struct NetDFSIterator<'a, I: Instantiable> {
+        netlist: &'a Netlist<I>,
+        stacks: Vec<Walk<DrivenNet<I>>>,
+        visited: HashSet<usize>,
+        cycles: bool,
+    }
+
+    impl<'a, I> NetDFSIterator<'a, I>
+    where
+        I: Instantiable,
+    {
+        /// Create a new DFS DrivenNet iterator for the netlist starting at `from`.
+        pub fn new(netlist: &'a Netlist<I>, from: DrivenNet<I>) -> Self {
             let mut s = Walk::new();
             s.push(from);
             Self {
@@ -2073,7 +2140,7 @@ pub mod iter {
         }
     }
 
-    impl<I> DFSIterator<'_, I>
+    impl<I> NetDFSIterator<'_, I>
     where
         I: Instantiable,
     {
@@ -2098,27 +2165,29 @@ pub mod iter {
         }
     }
 
-    impl<I> Iterator for DFSIterator<'_, I>
+    impl<I> Iterator for NetDFSIterator<'_, I>
     where
         I: Instantiable,
     {
-        type Item = NetRef<I>;
+        type Item = DrivenNet<I>;
 
         fn next(&mut self) -> Option<Self::Item> {
             if let Some(walk) = self.stacks.pop() {
+                if walk.contains_cycle() {
+                    self.cycles = true;
+                }
                 let item = walk.last().cloned();
-                let uw = item.clone().unwrap().unwrap();
+                let uw = item.clone().unwrap().unwrap().unwrap();
                 let index = uw.borrow().get_index();
                 if self.visited.insert(index) {
                     let operands = &uw.borrow().operands;
                     for operand in operands.iter().flatten() {
                         let mut new_walk = walk.clone();
-                        new_walk.push(NetRef::wrap(self.netlist.index_weak(&operand.root())));
-                        if !new_walk.contains_cycle() {
-                            self.stacks.push(new_walk);
-                        } else {
-                            self.cycles = true;
-                        }
+                        new_walk.push(DrivenNet::new(
+                            operand.secondary(),
+                            NetRef::wrap(self.netlist.index_weak(&operand.root())),
+                        ));
+                        self.stacks.push(new_walk);
                     }
                     return item;
                 }
@@ -2207,8 +2276,13 @@ where
     }
 
     /// Returns a depth-first search iterator over the nodes in the netlist.
-    pub fn dfs(&self, from: NetRef<I>) -> impl Iterator<Item = NetRef<I>> {
+    pub fn node_dfs(&self, from: NetRef<I>) -> impl Iterator<Item = NetRef<I>> {
         iter::DFSIterator::new(self, from)
+    }
+
+    /// Returns a depth-first search iterator over the nodes in the netlist, with the nodes in DrivenNet form.
+    pub fn net_dfs(&self, from: DrivenNet<I>) -> impl Iterator<Item = DrivenNet<I>> {
+        iter::NetDFSIterator::new(self, from)
     }
 
     #[cfg(feature = "serde")]
@@ -2421,6 +2495,7 @@ pub type GateRef = NetRef<Gate>;
 
 #[cfg(test)]
 mod tests {
+    use super::iter::{DFSIterator, NetDFSIterator};
     use super::*;
     #[test]
     fn test_delete_netlist() {
@@ -2479,6 +2554,91 @@ mod tests {
         let netlist = GateNetlist::new("min_module".to_string());
         let a = netlist.insert_input("a".into());
         DrivenNet::new(1, a.unwrap());
+    }
+
+    #[test]
+    fn test_netdfsiterator() {
+        let netlist = Netlist::new("dfs_netlist".to_string());
+
+        // inputs
+        let a = netlist.insert_input("a".into());
+        let b = netlist.insert_input("b".into());
+        let c = netlist.insert_input("c".into());
+        let d = netlist.insert_input("d".into());
+        let e = netlist.insert_input("e".into());
+
+        // gates
+        let n1 = netlist
+            .insert_gate(
+                Gate::new_logical("OR".into(), vec!["A".into(), "B".into()], "Y".into()),
+                "n1".into(),
+                &[a.clone(), b.clone()],
+            )
+            .unwrap()
+            .get_output(0);
+        let n2 = netlist
+            .insert_gate(
+                Gate::new_logical("NOR".into(), vec!["A".into(), "B".into()], "Y".into()),
+                "n2".into(),
+                &[d.clone(), e.clone()],
+            )
+            .unwrap()
+            .get_output(0);
+        let n3 = netlist
+            .insert_gate(
+                Gate::new_logical("AND".into(), vec!["A".into(), "B".into()], "Y".into()),
+                "n3".into(),
+                &[n1.clone(), c.clone()],
+            )
+            .unwrap()
+            .get_output(0);
+        let n4 = netlist
+            .insert_gate(
+                Gate::new_logical("NAND".into(), vec!["A".into(), "B".into()], "Y".into()),
+                "n4".into(),
+                &[n3.clone(), n2.clone()],
+            )
+            .unwrap()
+            .get_output(0);
+        n4.clone().expose_with_name("y".into());
+
+        // test DFSIterator
+        let mut dfs = NetDFSIterator::new(&netlist, n4.clone());
+        assert_eq!(dfs.next(), Some(n4));
+        assert_eq!(dfs.next(), Some(n2));
+        assert_eq!(dfs.next(), Some(e));
+        assert_eq!(dfs.next(), Some(d));
+        assert_eq!(dfs.next(), Some(n3));
+        assert_eq!(dfs.next(), Some(c));
+        assert_eq!(dfs.next(), Some(n1));
+        assert_eq!(dfs.next(), Some(b));
+        assert_eq!(dfs.next(), Some(a));
+        assert_eq!(dfs.next(), None);
+    }
+
+    #[test]
+    fn test_dfs_cycles() {
+        let netlist = Netlist::new("dfs_cycles".to_string());
+
+        // inputs
+        let a = netlist.insert_input("a".into());
+
+        // gates
+        let and = netlist.insert_gate_disconnected(
+            Gate::new_logical("AND".into(), vec!["A".into(), "B".into()], "Y".into()),
+            "and".into(),
+        );
+
+        // connect and form cycle
+        a.connect(and.get_input(0));
+        and.get_output(0).connect(and.get_input(1));
+
+        // test dfs iterators
+        let dfs = DFSIterator::new(&netlist, and.clone());
+        let driven_dfs = NetDFSIterator::new(&netlist, and.get_output(0));
+
+        assert!(dfs.detect_cycles());
+        assert!(driven_dfs.detect_cycles());
     }
 }
 #[cfg(feature = "serde")]
