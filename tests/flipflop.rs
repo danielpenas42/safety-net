@@ -799,7 +799,7 @@ mod flipflop {
             Some(CombDepthResult::CombCycle)
         );
     }
-    
+
     #[test]
     fn test_complex_seq_circuit_broken() {
         let netlist = Netlist::<Cell>::new("complex_circuit".to_string());
