@@ -187,15 +187,14 @@ where
             visiting.insert(node.clone());
 
             let mut max_depth = 0;
+            let mut is_undefined = false;
 
             for i in 0..node.get_num_input_ports() {
                 let driver = match netlist.get_driver(node.clone(), i) {
                     Some(d) => d,
                     None => {
-                        let r = CombDepthResult::Undefined;
-                        results.insert(node.clone(), r);
-                        visiting.remove(&node);
-                        return r;
+                        is_undefined = true;
+                        continue
                     }
                 };
 
@@ -210,10 +209,7 @@ where
                         max_depth = max_depth.max(d);
                     }
                     CombDepthResult::Undefined => {
-                        let r = CombDepthResult::Undefined;
-                        results.insert(node.clone(), r);
-                        visiting.remove(&node);
-                        return r;
+                        is_undefined = true;
                     }
                     CombDepthResult::CombCycle => {
                         let r = CombDepthResult::CombCycle;
@@ -223,9 +219,13 @@ where
                     }
                 }
             }
-
+       
             visiting.remove(&node);
-            let r = CombDepthResult::Depth(max_depth + 1);
+            let r = if is_undefined {
+                CombDepthResult::Undefined
+            } else {
+                CombDepthResult::Depth(max_depth + 1)
+            };
             results.insert(node.clone(), r);
             r
         }
