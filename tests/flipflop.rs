@@ -633,7 +633,6 @@ mod flipflop {
             depth_info.get_comb_depth(&ff),
             Some(CombDepthResult::Depth(0))
         );
-
     }
     #[test]
     fn test_complex_seq_circuit() {
@@ -729,7 +728,6 @@ mod flipflop {
             Some(CombDepthResult::Depth(3))
         );
 
-
         assert_eq!(depth_info.get_max_depth(), Some(3));
     }
 
@@ -783,7 +781,6 @@ mod flipflop {
             depth_info.get_comb_depth(&ff),
             Some(CombDepthResult::Depth(0))
         );
-
     }
 
     #[test]
