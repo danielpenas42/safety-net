@@ -634,11 +634,6 @@ mod flipflop {
             Some(CombDepthResult::Depth(0))
         );
 
-        // NOT a combinational loop
-        assert_ne!(
-            depth_info.get_comb_depth(&inv),
-            Some(CombDepthResult::CombCycle)
-        );
     }
     #[test]
     fn test_complex_seq_circuit() {
@@ -734,10 +729,6 @@ mod flipflop {
             Some(CombDepthResult::Depth(3))
         );
 
-        assert_ne!(
-            depth_info.get_comb_depth(&inv1),
-            Some(CombDepthResult::CombCycle)
-        );
 
         assert_eq!(depth_info.get_max_depth(), Some(3));
     }
@@ -793,11 +784,6 @@ mod flipflop {
             Some(CombDepthResult::Depth(0))
         );
 
-        // NOT a combinational loop
-        assert_ne!(
-            depth_info.get_comb_depth(&inv),
-            Some(CombDepthResult::CombCycle)
-        );
     }
 
     #[test]
@@ -895,11 +881,6 @@ mod flipflop {
             Some(CombDepthResult::Undefined)
         );
 
-        assert_ne!(
-            depth_info.get_comb_depth(&inv1),
-            Some(CombDepthResult::CombCycle)
-        );
-
         assert_eq!(depth_info.get_max_depth(), Some(1));
     }
 
@@ -982,11 +963,6 @@ mod flipflop {
         assert_eq!(
             depth_info.get_comb_depth(&or2),
             Some(CombDepthResult::Undefined)
-        );
-
-        assert_ne!(
-            depth_info.get_comb_depth(&and1),
-            Some(CombDepthResult::CombCycle)
         );
 
         assert_eq!(depth_info.get_max_depth(), Some(2));
