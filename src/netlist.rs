@@ -2056,6 +2056,10 @@ pub mod iter {
         }
     }
 
+    fn dfs_never_stops<I: Instantiable>(_: &DrivenNet<I>) -> bool {
+        false
+    }
+
     /// A depth-first iterator over the circuit nodes in a netlist
     /// # Examples
     ///
@@ -2074,8 +2078,11 @@ pub mod iter {
     ///     nodes.push(n);
     /// }
     /// ```
-    pub struct DFSIterator<'a, I: Instantiable> {
-        dfs: NetDFSIterator<'a, I>,
+    pub struct DFSIterator<'a, I: Instantiable, F = fn(&DrivenNet<I>) -> bool>
+    where
+        F: Fn(&DrivenNet<I>) -> bool,
+    {
+        dfs: NetDFSIterator<'a, I, F>,
     }
 
     impl<'a, I> DFSIterator<'a, I>
@@ -2090,9 +2097,28 @@ pub mod iter {
         }
     }
 
-    impl<I> DFSIterator<'_, I>
+    impl<'a, I, F> DFSIterator<'a, I, F>
     where
         I: Instantiable,
+        F: Fn(&DrivenNet<I>) -> bool,
+    {
+        /// Create a new DFS iterator for the netlist starting at `from` with a custom boundary.
+        /// If `stop_expand` returns true for a node, the node is yielded but its operands are not explored.
+        pub fn new_with_boundary(netlist: &'a Netlist<I>, from: NetRef<I>, stop_expand: F) -> Self {
+            Self {
+                dfs: NetDFSIterator::new_with_boundary(
+                    netlist,
+                    DrivenNet::new(0, from),
+                    stop_expand,
+                ),
+            }
+        }
+    }
+
+    impl<I, F> DFSIterator<'_, I, F>
+    where
+        I: Instantiable,
+        F: Fn(&DrivenNet<I>) -> bool,
     {
         /// Check if the DFS traversal has encountered a cycle yet.
         pub fn check_cycles(&self) -> bool {
@@ -2115,9 +2141,10 @@ pub mod iter {
         }
     }
 
-    impl<I> Iterator for DFSIterator<'_, I>
+    impl<I, F> Iterator for DFSIterator<'_, I, F>
     where
         I: Instantiable,
+        F: Fn(&DrivenNet<I>) -> bool,
     {
         type Item = NetRef<I>;
 
@@ -2127,12 +2154,16 @@ pub mod iter {
     }
 
     /// Depth-first iterator that works like DFSIterator but iterates over DrivenNet
-    pub struct NetDFSIterator<'a, I: Instantiable> {
+    pub struct NetDFSIterator<'a, I: Instantiable, F = fn(&DrivenNet<I>) -> bool>
+    where
+        F: Fn(&DrivenNet<I>) -> bool,
+    {
         netlist: &'a Netlist<I>,
         stacks: Vec<Walk<DrivenNet<I>>>,
         visited: HashSet<usize>,
         any_cycle: bool,
         root_cycle: bool,
+        stop_expand: F,
     }
 
     impl<'a, I> NetDFSIterator<'a, I>
@@ -2149,13 +2180,40 @@ pub mod iter {
                 visited: HashSet::new(),
                 any_cycle: false,
                 root_cycle: false,
+                stop_expand: dfs_never_stops::<I>,
             }
         }
     }
 
-    impl<I> NetDFSIterator<'_, I>
+    impl<'a, I, F> NetDFSIterator<'a, I, F>
     where
         I: Instantiable,
+        F: Fn(&DrivenNet<I>) -> bool,
+    {
+        /// Create a new DFS DrivenNet iterator for the netlist starting at `from` with a custom boundary.
+        /// If `stop_expand` returns true for a node, the node is yielded but its operands are not explored.
+        pub fn new_with_boundary(
+            netlist: &'a Netlist<I>,
+            from: DrivenNet<I>,
+            stop_expand: F,
+        ) -> Self {
+            let mut s = Walk::new();
+            s.push(from);
+            Self {
+                netlist,
+                stacks: vec![s],
+                visited: HashSet::new(),
+                any_cycle: false,
+                root_cycle: false,
+                stop_expand,
+            }
+        }
+    }
+
+    impl<I, F> NetDFSIterator<'_, I, F>
+    where
+        I: Instantiable,
+        F: Fn(&DrivenNet<I>) -> bool,
     {
         /// Check if the DFS traversal has encountered a cycle yet.
         pub fn check_cycles(&self) -> bool {
@@ -2198,9 +2256,10 @@ pub mod iter {
         }
     }
 
-    impl<I> Iterator for NetDFSIterator<'_, I>
+    impl<I, F> Iterator for NetDFSIterator<'_, I, F>
     where
         I: Instantiable,
+        F: Fn(&DrivenNet<I>) -> bool,
     {
         type Item = DrivenNet<I>;
 
@@ -2212,14 +2271,16 @@ pub mod iter {
                 let uw = item.clone().unwrap().unwrap().unwrap();
                 let index = uw.borrow().get_index();
                 if self.visited.insert(index) {
-                    let operands = &uw.borrow().operands;
-                    for operand in operands.iter().flatten() {
-                        let mut new_walk = walk.clone();
-                        new_walk.push(DrivenNet::new(
-                            operand.secondary(),
-                            NetRef::wrap(self.netlist.index_weak(&operand.root())),
-                        ));
-                        self.stacks.push(new_walk);
+                    if !(self.stop_expand)(item.as_ref().unwrap()) {
+                        let operands = &uw.borrow().operands;
+                        for operand in operands.iter().flatten() {
+                            let mut new_walk = walk.clone();
+                            new_walk.push(DrivenNet::new(
+                                operand.secondary(),
+                                NetRef::wrap(self.netlist.index_weak(&operand.root())),
+                            ));
+                            self.stacks.push(new_walk);
+                        }
                     }
                     return item;
                 }
@@ -2312,9 +2373,35 @@ where
         iter::DFSIterator::new(self, from)
     }
 
+    /// Returns a depth-first search iterator over the nodes in the netlist, with custom boundaries.
+    /// If `stop_expand` returns true for a node, the node is yielded but its operands are not explored.
+    pub fn node_dfs_with_boundary<F>(
+        &self,
+        from: NetRef<I>,
+        stop_expand: F,
+    ) -> impl Iterator<Item = NetRef<I>>
+    where
+        F: Fn(&DrivenNet<I>) -> bool,
+    {
+        iter::DFSIterator::new_with_boundary(self, from, stop_expand)
+    }
+
     /// Returns a depth-first search iterator over the nodes in the netlist, with the nodes in DrivenNet form.
     pub fn net_dfs(&self, from: DrivenNet<I>) -> impl Iterator<Item = DrivenNet<I>> {
         iter::NetDFSIterator::new(self, from)
+    }
+
+    /// Returns a depth-first search iterator over the nodes in DrivenNet form, with custom boundaries.
+    /// If `stop_expand` returns true for a node, the node is yielded but its operands are not explored.
+    pub fn net_dfs_with_boundary<F>(
+        &self,
+        from: DrivenNet<I>,
+        stop_expand: F,
+    ) -> impl Iterator<Item = DrivenNet<I>>
+    where
+        F: Fn(&DrivenNet<I>) -> bool,
+    {
+        iter::NetDFSIterator::new_with_boundary(self, from, stop_expand)
     }
 
     #[cfg(feature = "serde")]
@@ -2664,6 +2751,63 @@ mod tests {
         assert_eq!(dfs.next(), Some(n1));
         assert_eq!(dfs.next(), Some(b));
         assert_eq!(dfs.next(), Some(a));
+        assert_eq!(dfs.next(), None);
+    }
+
+    #[test]
+    fn test_netdfsiterator_with_boundary() {
+        let netlist = Netlist::new("dfs_netlist".to_string());
+
+        // inputs
+        let a = netlist.insert_input("a".into());
+        let b = netlist.insert_input("b".into());
+        let c = netlist.insert_input("c".into());
+        let d = netlist.insert_input("d".into());
+        let e = netlist.insert_input("e".into());
+
+        // gates
+        let n1 = netlist
+            .insert_gate(
+                Gate::new_logical("OR".into(), vec!["A".into(), "B".into()], "Y".into()),
+                "n1".into(),
+                &[a.clone(), b.clone()],
+            )
+            .unwrap()
+            .get_output(0);
+        let n2 = netlist
+            .insert_gate(
+                Gate::new_logical("NOR".into(), vec!["A".into(), "B".into()], "Y".into()),
+                "n2".into(),
+                &[d.clone(), e.clone()],
+            )
+            .unwrap()
+            .get_output(0);
+        let n3 = netlist
+            .insert_gate(
+                Gate::new_logical("AND".into(), vec!["A".into(), "B".into()], "Y".into()),
+                "n3".into(),
+                &[n1.clone(), c.clone()],
+            )
+            .unwrap()
+            .get_output(0);
+        let n4 = netlist
+            .insert_gate(
+                Gate::new_logical("NAND".into(), vec!["A".into(), "B".into()], "Y".into()),
+                "n4".into(),
+                &[n3.clone(), n2.clone()],
+            )
+            .unwrap()
+            .get_output(0);
+
+        // Stop DFS expansion at n3 to emulate a traversal boundary.
+        let n3_boundary = n3.clone();
+        let mut dfs =
+            NetDFSIterator::new_with_boundary(&netlist, n4.clone(), |n| *n == n3_boundary);
+        assert_eq!(dfs.next(), Some(n4));
+        assert_eq!(dfs.next(), Some(n2));
+        assert_eq!(dfs.next(), Some(e));
+        assert_eq!(dfs.next(), Some(d));
+        assert_eq!(dfs.next(), Some(n3));
         assert_eq!(dfs.next(), None);
     }
 
